@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.altronixsoft.com/opp/events/OrderCancelled.v1.json",
+  "title": "OrderCancelled v1",
+  "description": "An order was cancelled.",
+  "allOf": [
+    {
+      "$ref": "envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "OrderCancelled"
+    },
+    "eventVersion": {
+      "const": 1
+    },
+    "aggregateType": {
+      "const": "Order"
+    },
+    "producer": {
+      "const": "order-service"
+    },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    }
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "orderId",
+        "reason"
+      ],
+      "properties": {
+        "orderId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Order the event belongs to; also the Kafka partition key."
+        },
+        "reason": {
+          "enum": [
+            "CUSTOMER",
+            "TIMEOUT",
+            "PAYMENT_INITIATION_FAILED",
+            "PAYMENT_CANCELED"
+          ],
+          "description": "Why the order was cancelled."
+        }
+      }
+    }
+  }
+}

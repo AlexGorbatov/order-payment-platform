@@ -39,7 +39,9 @@ share a transaction.
 ## Implementation details
 
 Implemented in `libs/platform-messaging-starter` (package `…platform.messaging.outbox`, auto-configured, properties
-`platform.outbox.*`). Services only add the Flyway location `classpath:db/migration/platform` and `spring.kafka.*`.
+`platform.outbox.*`). Services only need `spring.kafka.*`: the starter registers its Flyway location
+`classpath:db/migration/platform` itself, so `outbox_event` is created even when a service customizes
+`spring.flyway.locations` (Flyway collapses the location when the default `classpath:db/migration` already covers it).
 
 ### Why a Kafka send inside a transaction that holds row locks is acceptable
 

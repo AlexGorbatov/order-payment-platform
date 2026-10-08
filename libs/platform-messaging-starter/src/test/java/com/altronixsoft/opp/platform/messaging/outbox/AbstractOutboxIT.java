@@ -16,7 +16,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 @SpringBootTest(
         classes = OutboxTestApplication.class,
         properties = {
-            "spring.flyway.locations=classpath:db/migration,classpath:db/migration/platform",
+            // The starter registers classpath:db/migration/platform with Flyway itself.
+            "spring.flyway.locations=classpath:db/migration/test",
             "spring.task.scheduling.pool.size=4",
             "platform.outbox.relay.initial-delay=0s",
             "platform.outbox.relay.fixed-delay=100ms",

@@ -37,6 +37,12 @@
       <groupId>io.micrometer</groupId>
       <artifactId>micrometer-core</artifactId>
     </dependency>
+    <!-- Optional: registers the starter's migrations with Flyway when the service uses it. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-flyway</artifactId>
+      <optional>true</optional>
+    </dependency>
     <!-- Generates IDE metadata for platform.outbox.* -->
     <dependency>
       <groupId>org.springframework.boot</groupId>

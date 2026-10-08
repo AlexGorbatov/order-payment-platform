@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.altronixsoft.com/opp/events/PaymentCanceled.v1.json",
+  "title": "PaymentCanceled v1",
+  "description": "The payment was cancelled at the provider.",
+  "allOf": [
+    {
+      "$ref": "envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "PaymentCanceled"
+    },
+    "eventVersion": {
+      "const": 1
+    },
+    "aggregateType": {
+      "const": "Payment"
+    },
+    "producer": {
+      "const": "payment-service"
+    },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    }
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "paymentId",
+        "orderId",
+        "reason"
+      ],
+      "properties": {
+        "paymentId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Payment aggregate id."
+        },
+        "orderId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Order the event belongs to; also the Kafka partition key."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Cancellation reason."
+        }
+      }
+    }
+  }
+}

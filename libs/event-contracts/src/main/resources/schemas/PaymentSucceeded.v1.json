@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.altronixsoft.com/opp/events/PaymentSucceeded.v1.json",
+  "title": "PaymentSucceeded v1",
+  "description": "The payment succeeded.",
+  "allOf": [
+    {
+      "$ref": "envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "PaymentSucceeded"
+    },
+    "eventVersion": {
+      "const": 1
+    },
+    "aggregateType": {
+      "const": "Payment"
+    },
+    "producer": {
+      "const": "payment-service"
+    },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    }
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "paymentId",
+        "orderId",
+        "amountMinor",
+        "currency",
+        "stripePaymentIntentId",
+        "succeededAt"
+      ],
+      "properties": {
+        "paymentId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Payment aggregate id."
+        },
+        "orderId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Order the event belongs to; also the Kafka partition key."
+        },
+        "amountMinor": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Amount in minor units of the currency (e.g. cents); strictly positive."
+        },
+        "currency": {
+          "type": "string",
+          "pattern": "^[A-Z]{3}$",
+          "description": "Upper-case ISO-4217 currency code."
+        },
+        "stripePaymentIntentId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider PaymentIntent id."
+        },
+        "succeededAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the provider reported success (ISO-8601, UTC)."
+        }
+      }
+    }
+  }
+}

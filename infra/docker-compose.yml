@@ -1,0 +1,272 @@
+# Local infrastructure for the Order & Payment Platform (architecture §16).
+#
+#   default profile : postgres, kafka (+ topic init), kafka-ui, keycloak, stripe-mock
+#   stripe-test     : stripe-cli forwarding real test-mode webhooks to payment-service on the host
+#   observability   : otel-collector, jaeger, prometheus, grafana (configs are stubs, filled in T16)
+#   apps            : order-service, payment-service (added in T18)
+#
+# Prefer ./scripts/up.sh and ./scripts/down.sh: they pass the repo-root .env and the right profiles.
+# Every variable has a dev default, so a plain `docker compose up -d` in infra/ works without .env.
+
+name: opp
+
+services:
+
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+      ORDERS_DB_USER: ${ORDERS_DB_USER:-orders}
+      ORDERS_DB_PASSWORD: ${ORDERS_DB_PASSWORD:-orders}
+      PAYMENTS_DB_USER: ${PAYMENTS_DB_USER:-payments}
+      PAYMENTS_DB_PASSWORD: ${PAYMENTS_DB_PASSWORD:-payments}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # TCP check: the temporary server used while init scripts run listens on the socket only,
+      # so this turns healthy only after orders_db and payments_db exist.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$$POSTGRES_USER\" -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  kafka:
+    image: apache/kafka:4.3.1
+    hostname: kafka
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk # any fixed base64 UUID; storage is formatted once
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:19092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:19092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Topics are created explicitly (kafka-init, Spring retry/DLT topic beans) — never implicitly.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 20s
+      retries: 15
+      start_period: 15s
+    restart: unless-stopped
+
+  # One-shot: creates the application topics (idempotent) and exits 0.
+  kafka-init:
+    image: apache/kafka:4.3.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: kafka:19092
+      TOPICS: order.events.v1 payment.events.v1
+      PARTITIONS: 3
+      REPLICATION_FACTOR: 1
+      RETENTION_MS: 604800000 # 7 d (architecture §9.1)
+    volumes:
+      - ./kafka/create-topics.sh:/opt/opp/create-topics.sh:ro
+    entrypoint: ["bash", "/opt/opp/create-topics.sh"]
+    restart: "no"
+
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: opp-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:19092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    ports:
+      - "8085:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    restart: unless-stopped
+
+  keycloak:
+    image: keycloak/keycloak:26.7.5
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+      # Fixed frontend URL => tokens always carry iss=http://localhost:8180/realms/opp, whether they are
+      # requested from the host or from containers (T18); backchannel (JWKS) stays reachable as keycloak:8080.
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # Substituted into realm-opp.json on import.
+      KEYCLOAK_OPS_CLIENT_SECRET: ${KEYCLOAK_OPS_CLIENT_SECRET:-opp-ops-cli-dev-secret}
+    ports:
+      - "8180:8080"
+    # No volume on purpose: the dev H2 store is recreated on every start, so realm-opp.json is the single
+    # source of truth (an existing realm would make --import-realm skip the file).
+    volumes:
+      - ./keycloak/realm-opp.json:/opt/keycloak/data/import/realm-opp.json:ro
+    healthcheck:
+      # The image has no curl/wget; probe the management port with bash /dev/tcp.
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+  # Stateless Stripe API double for the `local` Spring profile (architecture §8.1).
+  stripe-mock:
+    image: stripe/stripe-mock:v0.205.0
+    ports:
+      - "12111:12111"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null --header 'Authorization: Bearer sk_test_healthcheck' http://127.0.0.1:12111/v1/customers"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- profile: stripe-test
+
+  # Forwards real Stripe test-mode webhooks to payment-service running on the host (port 8082).
+  # Get the signing secret once with: docker compose run --rm stripe-cli listen --print-secret
+  stripe-cli:
+    image: stripe/stripe-cli:v1.53.0
+    profiles: ["stripe-test"]
+    command: ["listen", "--forward-to", "http://host.docker.internal:8082/webhooks/stripe"]
+    environment:
+      STRIPE_API_KEY: ${STRIPE_API_KEY:-}
+      STRIPE_DEVICE_NAME: opp-local-stripe-cli
+      STRIPE_CLI_TELEMETRY_OPTOUT: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Linux; Docker Desktop resolves it natively
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'stripe listen' > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- profile: observability
+  # Minimal working stubs; dashboards, alert rules and service scraping arrive in T16.
+
+  otel-collector:
+    profiles: ["observability"]
+    # The collector image is distroless; busybox is added only so the healthcheck can probe :13133.
+    build:
+      dockerfile_inline: |
+        FROM busybox:1.37.0-musl AS busybox
+        FROM otel/opentelemetry-collector-contrib:0.161.0
+        COPY --from=busybox /bin/busybox /busybox
+    image: opp/otel-collector:0.161.0
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    depends_on:
+      jaeger:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13133/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/jaeger:2.21.0
+    profiles: ["observability"]
+    ports:
+      - "16686:16686" # UI; OTLP is reachable only inside the network (via otel-collector)
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:13133/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.13.4
+    profiles: ["observability"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # to scrape services running on the host
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.1.7
+    profiles: ["observability"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  kafka-data:
+  prometheus-data:
+  grafana-data:

@@ -1,0 +1,2 @@
+org.springframework.boot.EnvironmentPostProcessor=\
+com.altronixsoft.opp.platform.messaging.consumer.ConsumerDefaultsEnvironmentPostProcessor

@@ -8,13 +8,13 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 /** Builds {@code OrderCreated} envelopes; {@code sequence} (stored as itemCount) lets tests verify ordering. */
-final class Events {
+public final class Events {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-10-08T12:00:00Z"), ZoneOffset.UTC);
 
     private Events() {}
 
-    static EventEnvelope<OrderCreated> orderCreated(UUID orderId, int sequence) {
+    public static EventEnvelope<OrderCreated> orderCreated(UUID orderId, int sequence) {
         return EventEnvelope.create(
                 new OrderCreated(orderId, "customer-1", 4_999, "EUR", sequence),
                 UUID.randomUUID(),

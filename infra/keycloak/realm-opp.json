@@ -1,0 +1,221 @@
+{
+  "realm": "opp",
+  "displayName": "Order & Payment Platform (DEV)",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 3600,
+  "roles": {
+    "realm": [
+      {
+        "name": "customer",
+        "description": "Places and manages own orders; reads own payments"
+      },
+      {
+        "name": "admin",
+        "description": "Reads all orders; issues refunds"
+      },
+      {
+        "name": "ops",
+        "description": "Dead letters and reconciliation endpoints"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "opp-web",
+      "name": "OPP Web",
+      "description": "Public client, Authorization Code + PKCE (S256). DEV REALM ONLY: directAccessGrantsEnabled=true so scripts/token.sh can use the password grant; it must be false in any non-dev realm.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "fullScopeAllowed": true,
+      "rootUrl": "",
+      "baseUrl": "",
+      "redirectUris": [
+        "http://localhost:5173/*",
+        "http://localhost:8081/*",
+        "http://localhost:8082/*"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-order-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "order-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        },
+        {
+          "name": "audience-payment-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "payment-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "opp-ops-cli",
+      "name": "OPP Ops CLI",
+      "description": "Confidential client for ops scripts (client_credentials only). Service account holds realm role ops. Secret comes from KEYCLOAK_OPS_CLIENT_SECRET.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_OPS_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "protocolMappers": [
+        {
+          "name": "audience-order-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "order-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        },
+        {
+          "name": "audience-payment-service",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "payment-service",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "username": "customer1",
+      "enabled": true,
+      "email": "customer1@opp.local",
+      "emailVerified": true,
+      "firstName": "Customer",
+      "lastName": "One",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": [
+        "customer"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "username": "customer2",
+      "enabled": true,
+      "email": "customer2@opp.local",
+      "emailVerified": true,
+      "firstName": "Customer",
+      "lastName": "Two",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": [
+        "customer"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000a1",
+      "username": "admin1",
+      "enabled": true,
+      "email": "admin1@opp.local",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "One",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": [
+        "admin"
+      ]
+    },
+    {
+      "id": "00000000-0000-4000-8000-0000000000f1",
+      "username": "ops1",
+      "enabled": true,
+      "email": "ops1@opp.local",
+      "emailVerified": true,
+      "firstName": "Ops",
+      "lastName": "One",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "password",
+          "temporary": false
+        }
+      ],
+      "requiredActions": [],
+      "realmRoles": [
+        "ops"
+      ]
+    },
+    {
+      "username": "service-account-opp-ops-cli",
+      "enabled": true,
+      "serviceAccountClientId": "opp-ops-cli",
+      "realmRoles": [
+        "ops"
+      ]
+    }
+  ]
+}

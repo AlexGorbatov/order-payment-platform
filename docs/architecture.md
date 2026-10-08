@@ -333,7 +333,7 @@ Unknown event types are skipped (forward compatibility), not dead-lettered.
 ## 10. Data Model
 
 **Platform tables (from starters, in each service DB)**
-- `outbox_event(id, aggregate_type, aggregate_id, partition_key, topic, event_type, event_version, payload jsonb, headers jsonb, created_at, published_at, attempts, last_error)` — partial index `WHERE published_at IS NULL`.
+- `outbox_event(id, aggregate_type, aggregate_id, partition_key, topic, event_type, event_version, payload jsonb, headers jsonb, created_at, published_at, attempts, last_error)` — partial index `WHERE published_at IS NULL`. `id` is the envelope `eventId`; `payload` holds the complete event envelope (it is the Kafka record value), `headers` the Kafka headers to send — ADR-0004.
 - `inbox_message(consumer_group, event_id, received_at)` — PK (consumer_group, event_id).
 - `dead_letter_message(id, original_topic, dlt_topic, partition, "offset", message_key, payload, headers jsonb, exception_class, exception_message, status NEW|REPLAYED|RESOLVED, note, created_at, updated_at)`.
 - `idempotency_record(principal, idem_key, request_hash, status IN_PROGRESS|COMPLETED, response_status, response_headers jsonb, response_body, created_at, expires_at)` — PK (principal, idem_key).

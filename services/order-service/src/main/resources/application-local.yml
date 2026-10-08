@@ -1,0 +1,8 @@
+# Local development: expose the OpenAPI document (/v3/api-docs) and Swagger UI (/swagger-ui.html).
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    # "Authorize" in Swagger UI takes a token from ./scripts/token.sh customer1
+    persist-authorization: true

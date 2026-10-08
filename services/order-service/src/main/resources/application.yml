@@ -12,6 +12,44 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+    properties:
+      # list pages load lines and history of up to 100 orders in a few queries instead of two per order
+      hibernate.default_batch_fetch_size: 50
+  jackson:
+    # a strict contract: 1.5 or "2" are not quantities
+    deserialization:
+      accept-float-as-int: false
+    mapper:
+      allow-coercion-of-scalars: false
   flyway:
     # service migrations first, then the ones the platform starters ship (V1000+)
     locations: classpath:db/migration,classpath:db/migration/platform
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # must equal the `iss` of the tokens; the realm is imported by infra/keycloak/realm-opp.json
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/opp}
+          # where to fetch the signing keys; defaults to <issuer>/protocol/openid-connect/certs
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:}
+
+opp:
+  security:
+    audience: order-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+springdoc:
+  # the OpenAPI document and Swagger UI exist only in the `local` profile (application-local.yml)
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

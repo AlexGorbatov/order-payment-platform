@@ -9,4 +9,7 @@ public interface ProductCatalog {
 
     /** The products with these SKUs, active or not; unknown SKUs are simply absent from the result. */
     List<Product> findBySkus(Collection<String> skus);
+
+    /** The products a customer can order, sorted by SKU. */
+    List<Product> findActive();
 }

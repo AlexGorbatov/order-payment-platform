@@ -382,6 +382,31 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 
 **Both services:** `GET /admin/dead-letters`, `GET /admin/dead-letters/{id}`, `POST /admin/dead-letters/{id}/replay`, `POST /admin/dead-letters/{id}/resolve` (ops). Actuator: `health`, `info` public; `prometheus` and the rest restricted. Errors: RFC 9457 ProblemDetail.
 
+**Implementation notes (order-service API, T08).**
+- *Who may call what* is decided per endpoint in the security filter chain (`SecurityConfiguration`); *which orders* a caller may see is decided in the use cases (`Caller`: `sub` plus an admin flag). A customer asking for an order that is not theirs gets exactly the 404 of a missing id. Roles: `GET /products` any authenticated caller; `POST /orders`, `POST /orders/{id}/cancel` role `customer` (an admin cannot cancel on a customer's behalf); `GET /orders[/{id}]` `customer` (own) or `admin` (all); `POST /orders/{id}/refund` `admin`. `ops` has no business endpoints, only actuator and (later) the admin endpoints.
+- *Tokens*: signature (JWKS, RS256 only), `iss`, `exp`/`nbf` and `aud=order-service` are validated; the realm roles `customer|admin|ops` become `ROLE_*`, every other realm role grants nothing. The JWKS location is configured separately (`KEYCLOAK_JWK_SET_URI`) from the issuer (`KEYCLOAK_ISSUER_URI`), because inside a container network Keycloak is reached under another name than the one tokens carry. Stateless, no CSRF, no cookies; 401 carries `WWW-Authenticate: Bearer`.
+- *Responses*: `201` + `Location` for create, `200` for cancel, `202` for refund (the money moves asynchronously); an order carries its lines (name and price as copied from the catalog) and its status history; a list holds summaries. Lists are `{content, page, size, totalElements, totalPages}`, `page` counted from 0, `size` 1–100 (default 20), always newest first (`createdAt` desc, id desc as tie-breaker).
+- *Errors* are RFC 9457 problems, `Content-Type: application/problem+json`, `type = urn:problem-type:<code>`:
+
+| Code | Status | When |
+|---|---|---|
+| `unauthorized` / `forbidden` | 401 / 403 | no valid token for this service / role missing |
+| `validation-failed` | 400 | Bean Validation or a bad path/query value; `errors[] = {field, message}` |
+| `malformed-request` | 400 | body missing, not JSON, or of the wrong shape (no echo of the input) |
+| `invalid-order` | 400 | the request breaks a domain rule (duplicate SKU) |
+| `order-not-found` | 404 | no such order, or not the caller's |
+| `not-found`, `method-not-allowed`, `unsupported-media-type`, `not-acceptable` | 404, 405, 415, 406 | routing and content negotiation |
+| `order-state-conflict` | 409 | illegal transition; `currentStatus` names the status |
+| `concurrent-modification` | 409 | optimistic-lock conflict; fetch again and retry |
+| `product-not-available` | 422 | unknown or discontinued SKU; `skus[]` |
+| `internal-error` | 500 | anything unforeseen; logged, never detailed |
+
+  The `Idempotency-Key` problems (400/409/422/413) are written by `platform-idempotency-starter` with its own `urn:opp:problem:*` types (ADR-0006); unifying the two prefixes is a follow-up.
+- *Strict JSON*: unknown properties are ignored (so client-sent prices, totals and `customerId` never matter), but `1.5` or `"2"` are not a quantity.
+- *Idempotency*: `POST /orders`, `/cancel` and `/refund` are `@Idempotent` (24 h). A replay returns the stored answer, even a 404 or 409; a genuinely new request meets the new state (cancelling twice with two keys is a 409).
+- *OpenAPI*: `/v3/api-docs` (+ `.yaml`) and Swagger UI exist only with `springdoc.api-docs.enabled=true`, which only the `local` profile sets; elsewhere they are 401/404. The document declares the bearer scheme, the `Idempotency-Key` header and the problem responses with examples.
+- *Not yet*: cancel and refund change the order but publish nothing — `OrderCancelled`/`RefundRequested` are registered on the aggregate and reach the outbox in T09.
+
 ## 12. Security
 
 - Keycloak realm `opp`; realm roles `customer`, `admin`, `ops`.

@@ -22,4 +22,11 @@ class JpaProductCatalog implements ProductCatalog {
     public List<Product> findBySkus(Collection<String> skus) {
         return products.findAllById(skus).stream().map(OrderMapper::toDomain).toList();
     }
+
+    @Override
+    public List<Product> findActive() {
+        return products.findByActiveTrueOrderBySku().stream()
+                .map(OrderMapper::toDomain)
+                .toList();
+    }
 }

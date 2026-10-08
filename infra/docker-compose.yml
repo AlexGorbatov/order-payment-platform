@@ -85,6 +85,8 @@ services:
       PARTITIONS: 3
       REPLICATION_FACTOR: 1
       RETENTION_MS: 604800000 # 7 d (architecture §9.1)
+      RETRY_TOPICS: 3 # <topic>-retry-0 … -2, matches platform.consumer.retry.topic-delays
+      DLT_RETENTION_MS: 1209600000 # 14 d for retry and dead-letter topics
     volumes:
       - ./kafka/create-topics.sh:/opt/opp/create-topics.sh:ro
     entrypoint: ["bash", "/opt/opp/create-topics.sh"]

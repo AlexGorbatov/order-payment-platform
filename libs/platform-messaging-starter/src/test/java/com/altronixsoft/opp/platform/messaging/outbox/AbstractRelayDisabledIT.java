@@ -9,12 +9,19 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** Context without the background relay, so tests drive {@link OutboxRelay} instances by hand. */
 @TestPropertySource(properties = "platform.outbox.relay.enabled=false")
 abstract class AbstractRelayDisabledIT extends AbstractOutboxIT {
+
+    @DynamicPropertySource
+    static void ownDatabase(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", () -> TestInfrastructure.databaseUrl("outbox_relay_off"));
+    }
 
     @Autowired
     protected KafkaProperties kafkaProperties;

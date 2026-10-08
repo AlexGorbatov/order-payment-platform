@@ -25,8 +25,31 @@ public class OutboxRepository {
         this.jdbc = jdbc;
     }
 
-    /** Inserts a row; {@code created_at} is assigned by the database. */
+    /** Inserts a row for {@code envelope}; {@code created_at} is assigned by the database. */
     public void insert(EventEnvelope<?> envelope, String topic, String envelopeJson, Map<String, String> headers) {
+        insertRaw(
+                envelope.eventId(),
+                envelope.aggregateType(),
+                envelope.aggregateId(),
+                envelope.partitionKey(),
+                topic,
+                envelope.eventType(),
+                envelope.eventVersion(),
+                envelopeJson,
+                headers);
+    }
+
+    /** Inserts a row from already extracted routing fields; {@code created_at} is assigned by the database. */
+    public void insertRaw(
+            UUID id,
+            String aggregateType,
+            UUID aggregateId,
+            String partitionKey,
+            String topic,
+            String eventType,
+            int eventVersion,
+            String payloadJson,
+            Map<String, String> headers) {
         jdbc.sql("""
                         INSERT INTO outbox_event
                             (id, aggregate_type, aggregate_id, partition_key, topic, event_type, event_version,
@@ -35,14 +58,14 @@ public class OutboxRepository {
                             (:id, :aggregateType, :aggregateId, :partitionKey, :topic, :eventType, :eventVersion,
                              CAST(:payload AS jsonb), CAST(:headers AS jsonb))
                         """)
-                .param("id", envelope.eventId())
-                .param("aggregateType", envelope.aggregateType())
-                .param("aggregateId", envelope.aggregateId())
-                .param("partitionKey", envelope.partitionKey())
+                .param("id", id)
+                .param("aggregateType", aggregateType)
+                .param("aggregateId", aggregateId)
+                .param("partitionKey", partitionKey)
                 .param("topic", topic)
-                .param("eventType", envelope.eventType())
-                .param("eventVersion", envelope.eventVersion())
-                .param("payload", envelopeJson)
+                .param("eventType", eventType)
+                .param("eventVersion", eventVersion)
+                .param("payload", payloadJson)
                 .param("headers", writeHeaders(headers))
                 .update();
     }

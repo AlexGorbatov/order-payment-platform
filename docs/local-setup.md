@@ -116,8 +116,9 @@ Access tokens live 15 minutes. Example payload for `customer1`:
 ## Kafka topics
 
 Broker auto-creation is disabled (`auto.create.topics.enable=false`). `kafka-init` creates `order.events.v1` and
-`payment.events.v1` with 3 partitions, replication factor 1 and 7-day retention (architecture §9.1). Retry and DLT
-topics are declared by the services themselves. Browse them in kafka-ui at http://localhost:8085.
+`payment.events.v1` with 3 partitions, replication factor 1 and 7-day retention (architecture §9.1), plus their
+retry topics (`<topic>-retry-0 … -2`) and dead-letter topic (`<topic>-dlt`) with 14-day retention (§7.4). Operating
+dead letters: [runbooks/dlq.md](runbooks/dlq.md). Browse them in kafka-ui at http://localhost:8085.
 
 ## Stripe modes
 

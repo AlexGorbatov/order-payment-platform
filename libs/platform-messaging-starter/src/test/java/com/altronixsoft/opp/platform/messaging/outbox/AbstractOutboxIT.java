@@ -23,6 +23,9 @@ import org.springframework.transaction.support.TransactionTemplate;
             "platform.outbox.relay.fixed-delay=100ms",
             "platform.outbox.relay.ack-timeout=2s",
             "platform.outbox.cleanup.enabled=false",
+            "platform.inbox.enabled=false",
+            "platform.consumer.enabled=false",
+            "platform.dead-letters.enabled=false",
             "platform.outbox.metrics.cache-ttl=200ms"
         })
 abstract class AbstractOutboxIT {
@@ -41,7 +44,7 @@ abstract class AbstractOutboxIT {
 
     @DynamicPropertySource
     static void infrastructure(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", TestInfrastructure.POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.url", () -> TestInfrastructure.databaseUrl("outbox_relay_on"));
         registry.add("spring.datasource.username", TestInfrastructure.POSTGRES::getUsername);
         registry.add("spring.datasource.password", TestInfrastructure.POSTGRES::getPassword);
         registry.add("spring.kafka.bootstrap-servers", TestInfrastructure.KAFKA::getBootstrapServers);

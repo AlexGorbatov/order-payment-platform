@@ -1,1 +1,4 @@
 com.altronixsoft.opp.platform.messaging.outbox.OutboxAutoConfiguration
+com.altronixsoft.opp.platform.messaging.inbox.InboxAutoConfiguration
+com.altronixsoft.opp.platform.messaging.consumer.ConsumerAutoConfiguration
+com.altronixsoft.opp.platform.messaging.deadletter.DeadLetterAutoConfiguration

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.altronixsoft.com/opp/events/envelope.v1.json",
+  "title": "Event envelope v1",
+  "description": "Common wrapper of every event (architecture §9.2). Unknown properties are allowed: additive changes keep the version.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "aggregateType",
+    "aggregateId",
+    "partitionKey",
+    "occurredAt",
+    "producer",
+    "correlationId",
+    "payload"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUIDv7; the consumer inbox deduplicates on it."
+    },
+    "eventType": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]*$",
+      "description": "Event type name."
+    },
+    "eventVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Schema version of this event type."
+    },
+    "aggregateType": {
+      "enum": [
+        "Order",
+        "Payment"
+      ],
+      "description": "Aggregate that emitted the event."
+    },
+    "aggregateId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Id of the aggregate that emitted the event."
+    },
+    "partitionKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Kafka record key: the order id."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the event happened (ISO-8601, UTC)."
+    },
+    "producer": {
+      "enum": [
+        "order-service",
+        "payment-service"
+      ],
+      "description": "Emitting service."
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Shared by every event and request of one business flow."
+    },
+    "causationId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Event or request that directly triggered this event; optional."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Event data, see the event-specific schema."
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.altronixsoft.com/opp/events/PaymentDisputed.v1.json",
+  "title": "PaymentDisputed v1",
+  "description": "The customer opened a dispute for the payment.",
+  "allOf": [
+    {
+      "$ref": "envelope.v1.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "PaymentDisputed"
+    },
+    "eventVersion": {
+      "const": 1
+    },
+    "aggregateType": {
+      "const": "Payment"
+    },
+    "producer": {
+      "const": "payment-service"
+    },
+    "payload": {
+      "$ref": "#/$defs/payload"
+    }
+  },
+  "$defs": {
+    "payload": {
+      "type": "object",
+      "required": [
+        "paymentId",
+        "orderId",
+        "disputeId",
+        "reason"
+      ],
+      "properties": {
+        "paymentId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Payment aggregate id."
+        },
+        "orderId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Order the event belongs to; also the Kafka partition key."
+        },
+        "disputeId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Provider dispute id."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dispute reason."
+        }
+      }
+    }
+  }
+}

@@ -10,6 +10,7 @@ reconciliation, and Testcontainers-based tests that never need a real Stripe acc
 
 - [Architecture](docs/architecture.md) — scope, flows, state machines, contracts, data model, failure matrix
 - [Architecture Decision Records](docs/adr/)
+- [Local setup](docs/local-setup.md) — docker compose infrastructure, ports, dev accounts, tokens
 - [Backlog](docs/backlog.md)
 
 ## Build

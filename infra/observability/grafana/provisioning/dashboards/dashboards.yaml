@@ -1,0 +1,10 @@
+# Loads dashboard JSON files from infra/observability/grafana/dashboards (empty until T16).
+apiVersion: 1
+
+providers:
+  - name: opp
+    folder: OPP
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards

@@ -101,6 +101,12 @@ stateDiagram-v2
 - Prices come only from the server-side catalog; the client sends `sku` + `quantity`. 1–20 lines, quantity 1–10, single currency (EUR in seed data).
 - Every transition writes `order_status_history` (source: API | EVENT | JOB, source event id).
 
+**Implementation notes (order-service domain, T07).** The aggregate `Order` is plain Java; each command (`place`, `markPaid`, `cancel(reason)`, `requestRefund(reason, refundRequestId)`, `markRefunded`, `markRefundFailed`, `markDisputed`) checks first and changes afterwards, so a rejected command (`IllegalOrderTransitionException`) leaves status, history and events untouched. An accepted one moves the status, appends a history entry and registers one domain event, which the application layer hands to the outbox in the saving transaction (T09). Details the diagram leaves implicit:
+- `requestRefund` couples the reason to the status it comes from: `LATE_PAYMENT_AFTER_CANCEL` only from `CANCELLED` (automatic compensation), `ADMIN` from `PAID` and from `REFUND_FAILED` (retry), never `ADMIN` from `CANCELLED`. Refunds are always for the full order total (§5.3).
+- A dispute sets the flag in any status and writes a history entry with `from_status = to_status` and reason `DISPUTED`; repeating it changes nothing.
+- A SKU may appear on one line only (the limits are checked on the lines after price lookup); quantity 1–10 and 1–20 lines are enforced by the domain, prices and names are copied from the catalog into `order_item` at ordering time.
+- Persistence: `@Version` plus a version check in `save`; the repository returns a fresh `Order` with the new version, and only that instance may be changed further.
+
 ### 5.2 Payment
 
 ```mermaid

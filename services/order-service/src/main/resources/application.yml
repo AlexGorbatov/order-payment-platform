@@ -1,0 +1,17 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: order-service
+  datasource:
+    url: ${ORDERS_DB_URL:jdbc:postgresql://localhost:5432/orders_db}
+    username: ${ORDERS_DB_USER:orders}
+    password: ${ORDERS_DB_PASSWORD:orders}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    # service migrations first, then the ones the platform starters ship (V1000+)
+    locations: classpath:db/migration,classpath:db/migration/platform

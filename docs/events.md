@@ -36,7 +36,7 @@ Every record value is a JSON object (`EventEnvelope`, schema `envelope.v1.json`)
 | `payload` | object | yes | Event data, see below. |
 
 Kafka headers (set by the messaging starter, not part of this module): `eventType`, `eventVersion`, `correlationId`,
-`traceparent`.
+`traceparent` (only when a tracer is configured; the services of v1.0.0 do not configure one, architecture §13).
 
 ```json
 {

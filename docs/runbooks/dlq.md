@@ -7,7 +7,7 @@ until someone purges it.
 
 | | |
 |---|---|
-| Alert | `dlt.messages{topic}` increases; or `GET /admin/dead-letters?status=NEW` is not empty |
+| Signals | (metric; v1.0.0 ships no alert rules, architecture §13) `dlt.messages{topic}` increases; or `GET /admin/dead-letters?status=NEW` is not empty |
 | Who | an operator with the realm role `ops` |
 | API | `https://<service>/admin/dead-letters` — order-service (8081) or payment-service (8082) |
 | Statuses | `NEW` → `REPLAYED` and/or `RESOLVED` |

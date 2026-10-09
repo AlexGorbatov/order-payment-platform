@@ -1,7 +1,7 @@
 # ADR-0007: Retry topics + DLT + persisted dead letters; ordering trade-off
 
 - Status: Accepted
-- Date: 2026-10-08 (implementation details added with T05)
+- Date: 2026-10-08 (implementation details added with the consumer implementation)
 - Related: architecture §7.2, §7.4, §7.5, §10, §11, §15 (F03, F15), ADR-0005, ADR-0006
 
 ## Context
@@ -123,3 +123,12 @@ DLT topics are named from the source topic, and the infrastructure script pre-cr
   their role check.
 - Operational steps: `docs/runbooks/dlq.md`.
 
+
+## Addendum: which dead letters a service stores
+
+The persister subscribes to the pattern `platform.dead-letters.persister.topic-pattern`, default `.*-dlt`. Both services share
+one broker, so with the default each service stored the dead letters of the other one's consumer, which contradicts the
+rule above (a dead letter lives in the service that consumed the record) and let an operator replay an event from the
+wrong service. The end-to-end poison-message scenario found it. Each service now sets the pattern to the dead-letter topic of
+the topic it consumes (`payment.events.v1-dlt` in order-service, `order.events.v1-dlt` in payment-service). The default
+stays as it is; deriving it from the service's own listeners is in the backlog.

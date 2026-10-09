@@ -40,7 +40,7 @@ docker compose -f infra/docker-compose.yml ps -a
 | default | postgres, kafka, kafka-init, kafka-ui, keycloak, stripe-mock | infrastructure for the `local` Spring profile |
 | `apps` | order-service, payment-service, checkout | the services as containers (stripe-mock, `local` Spring profile) and the demo checkout page |
 | `stripe-test` | stripe-cli | real Stripe test mode: forwards webhooks to payment-service on the host; with `apps` and [`docker-compose.stripe-test.yml`](../infra/docker-compose.stripe-test.yml) (what `up.sh --apps --stripe-test` does) it also switches payment-service to the real Stripe API |
-| `observability` | otel-collector, jaeger, prometheus, grafana | tracing and metrics (configs are stubs until T16) |
+| `observability` | otel-collector, jaeger, prometheus, grafana | tracing and metrics backends (skeleton configuration: no service targets, no dashboard; see architecture §13) |
 
 ## Ports
 

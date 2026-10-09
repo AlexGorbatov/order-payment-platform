@@ -36,7 +36,7 @@ holds locks and connections across a network call and makes the outcome ambiguou
 - Enforced statically where possible (ArchUnit: no Stripe/Kafka access in `@Transactional` code, no Stripe in Kafka
   consumers) and dynamically by failure tests F04–F08.
 
-## Addendum (T12): the claim lease and the 23-hour rule of the PaymentInitiationWorker
+## Addendum: the claim lease and the 23-hour rule of the PaymentInitiationWorker
 
 **Lease.** The claim transaction ends before the Stripe call, so its row locks do too. To keep a second worker (or the
 next run of the same one) from claiming the same payment while Stripe is being called, the claim also *leases* the row:

@@ -8,7 +8,7 @@ is retried with backoff (`FAILED`) and, after `payment.webhook-processor.retry-m
 
 | | |
 |---|---|
-| Alerts | `webhook.dead` increases (page) · `webhook.livemode.rejected` > 0 (page) · `webhook.signature.failures` rate > 0 for 10 min · `webhook.processing.lag` p95 > 1 min · Stripe Dashboard reports failed deliveries |
+| Signals | (metrics; v1.0.0 ships no alert rules, architecture §13) `webhook.dead` increases (page) · `webhook.livemode.rejected` > 0 (page) · `webhook.signature.failures` rate > 0 for 10 min · `webhook.processing.lag` p95 > 1 min · Stripe Dashboard reports failed deliveries |
 | Who | an operator with database access to `payments_db` and access to the Stripe Dashboard (test mode) |
 | Statuses | `RECEIVED` → `PROCESSED` \| `IGNORED`; on error `FAILED` → … → `DEAD` |
 | Logs | every line of one event carries `stripeEventId`, and `paymentId` / `orderId` / `correlationId` once the payment is known; payloads and signatures are never logged |

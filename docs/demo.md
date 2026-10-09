@@ -199,8 +199,8 @@ customer1`). Reconciliation and dead letters are operator endpoints (role `ops`,
 
 **Jaeger and Grafana.** `./scripts/up.sh --apps --observability` also starts the OpenTelemetry collector, Jaeger
 (<http://localhost:16686>), Prometheus and Grafana (<http://localhost:3000>, `admin`/`admin`). The services export traces
-and metrics only once the observability work (T16: tracing across the async boundaries, ECS logs, metrics, the "OPP
-Overview" dashboard) is part of the code; until then these UIs start but stay empty.
+and metrics only once tracing export and a dashboard exist; v1.0.0 does not ship them (architecture §13), so these UIs
+start but stay empty.
 
 ## Troubleshooting
 

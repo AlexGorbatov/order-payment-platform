@@ -41,6 +41,12 @@ Prerequisites: JDK 21, Docker. The first run pulls the images (PostgreSQL 17, Ka
 the `build` job uploads them as an artifact and `e2e` downloads them. Their location is `e2e.order-service.jar` /
 `e2e.payment-service.jar` in `e2e-tests/pom.xml`.
 
+CI (`.github/workflows/ci.yml`) has four jobs: `build` (`./mvnw verify`, coverage reports, the service jars as an artifact),
+`e2e` (needs `build`; the scenarios above, 25 minutes at most), `images` (the compose files are valid and both images build) and
+`badges` (pushes to `main` only: publishes the coverage number for the README badge to the `badges` branch). The number is the
+line coverage of everything JaCoCo measures in the libraries and services, computed by `.github/scripts/coverage-badge.sh`;
+the 80 % gate of the build applies to `domain` and `application`.
+
 Logs of the two services are written to `e2e-tests/target/e2e-logs/` (appended across restarts within a run). When a
 scenario fails, the tail of both is printed with the failure, and CI uploads the directory.
 
@@ -63,7 +69,7 @@ to get there were weighed:
 Processes won: they test the **artifact** (fat jar, Flyway on an empty database, configuration binding, start-up) with
 a real **crash** (`ServiceProcess.kill()`), and cost none of the networking and image plumbing that an in-JVM setup
 cannot avoid or a container setup needs. What it gives up against containers is network isolation and the `Dockerfile`
-itself; the compose `apps` profile (T18) will cover the images, and nothing in the scenarios depends on how a service is
+itself; the compose `apps` profile builds the images (docs/demo.md) and could be the target of the same scenarios (backlog); nothing in them depends on how a service is
 started: only `ServiceProcess` knows.
 
 ### What runs

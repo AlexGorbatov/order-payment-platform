@@ -1,7 +1,7 @@
 # ADR-0006: Multi-layer idempotency
 
 - Status: Accepted
-- Date: 2026-10-08 (HTTP layer details added with T06)
+- Date: 2026-10-08 (HTTP layer details added with the HTTP implementation)
 - Related: architecture §7.3, §8.2, §10, §11, §15 (F04, F05, F09, F16, F17, F21, F22), ADR-0013
 
 ## Context

@@ -1,7 +1,7 @@
 # ADR-0005: Inbox-based idempotent consumers
 
 - Status: Accepted
-- Date: 2026-10-08 (implementation details added with T05)
+- Date: 2026-10-08 (implementation details added with the inbox implementation)
 - Related: architecture §7.2, §10, §15 (F02, F03), ADR-0004, ADR-0007
 
 ## Context

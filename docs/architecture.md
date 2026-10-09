@@ -490,7 +490,9 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 | Architecture | layering rules | ArchUnit | — |
 | Manual demo | real Stripe test mode | docker compose + Stripe CLI | real Stripe |
 
-Global invariants asserted at the end of every E2E test: ≤ 1 succeeded PaymentIntent per order; payment amount = order total; no stuck outbox rows; no unexpected DEAD webhook events.
+Global invariants asserted at the end of every E2E test: ≤ 1 succeeded PaymentIntent per order; payment amount = order total; no stuck outbox rows; no unexpected DEAD webhook events or unattended dead letters; no money returned twice; every mutating Stripe call carries an idempotency key derived from local ids; order and payment states agree.
+
+**E2E implementation (T17).** The scenarios run both services as processes (`java -jar` of the jars the build produces) against Testcontainers PostgreSQL, Kafka and Keycloak and a stateful Stripe simulator on WireMock (PaymentIntents, refunds, idempotency keys, signed webhooks that can be held, dropped, reordered or duplicated). Chaos is real: `kill -9` of a service, `docker pause` of Kafka. They are a profile of their own (`-Pe2e`) and a CI job that needs `build`. Rationale, helpers, scenario catalogue and the failure-matrix coverage map: [testing.md](testing.md).
 
 ## 15. Failure Mode Matrix
 

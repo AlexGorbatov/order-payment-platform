@@ -37,3 +37,56 @@ jobs:
           name: jacoco-reports
           path: '**/target/site/jacoco/'
           if-no-files-found: ignore
+
+      # The end-to-end job runs the very jars that were just verified; it does not build them again.
+      - name: Upload service jars
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-jars
+          path: |
+            services/order-service/target/order-service-*-SNAPSHOT.jar
+            services/payment-service/target/payment-service-*-SNAPSHOT.jar
+          if-no-files-found: error
+          retention-days: 2
+
+  # Both services as processes against PostgreSQL, Kafka, Keycloak and a Stripe double (docs/testing.md). Separate from
+  # `build` because it takes minutes and needs the jars, not the sources; a hung environment ends at the timeouts, not
+  # at the six hours GitHub allows.
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Download service jars
+        uses: actions/download-artifact@v4
+        with:
+          name: service-jars
+          path: services
+
+      - name: Check the jars
+        run: ls -l services/order-service/target/*.jar services/payment-service/target/*.jar
+
+      # -am builds event-contracts (the scenarios use its envelope), which is quick; the services are not rebuilt.
+      - name: Run end-to-end scenarios
+        run: ./mvnw -B -ntp -pl e2e-tests -am -Pe2e verify
+
+      - name: Upload service logs and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: |
+            e2e-tests/target/e2e-logs/
+            e2e-tests/target/failsafe-reports/
+          if-no-files-found: ignore
+          retention-days: 7

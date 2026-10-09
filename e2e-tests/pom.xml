@@ -12,17 +12,106 @@
 
   <artifactId>e2e-tests</artifactId>
   <name>e2e-tests</name>
-  <description>Cross-service scenarios and chaos tests.</description>
+  <description>Cross-service scenarios and chaos tests: both services as real processes against real infrastructure.</description>
+
+  <properties>
+    <!--
+      The scenarios take minutes and need Docker, so they run only with -Pe2e (CI: a job of its own). The default build
+      compiles this module and runs nothing.
+    -->
+    <e2e.skip>true</e2e.skip>
+    <!-- The executable jars of the services (built by `package` of their modules; CI hands them over as artifacts). -->
+    <e2e.order-service.jar>${project.basedir}/../services/order-service/target/order-service-${project.version}.jar</e2e.order-service.jar>
+    <e2e.payment-service.jar>${project.basedir}/../services/payment-service/target/payment-service-${project.version}.jar</e2e.payment-service.jar>
+  </properties>
 
   <dependencies>
+    <!-- Builds and reads event envelopes for the events the tests inject and inspect. -->
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>event-contracts</artifactId>
+      <scope>test</scope>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-logging</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.awaitility</groupId>
+      <artifactId>awaitility</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- JdbcClient to look into both databases -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-jdbc</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.github.dasniko</groupId>
+      <artifactId>testcontainers-keycloak</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The Stripe API double (standalone on purpose, see the parent pom) -->
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
+    <testResources>
+      <testResource>
+        <directory>src/test/resources</directory>
+      </testResource>
+      <!-- The Keycloak container imports the very realm file the local environment uses (realm-opp.json). -->
+      <testResource>
+        <directory>${project.basedir}/../infra/keycloak</directory>
+        <includes>
+          <include>realm-opp.json</include>
+        </includes>
+      </testResource>
+    </testResources>
+
     <plugins>
       <!-- Test-only module: nothing to package. -->
       <plugin>
@@ -32,6 +121,43 @@
           <skipIfEmpty>true</skipIfEmpty>
         </configuration>
       </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <skip>${e2e.skip}</skip>
+          <!-- One JVM owns the whole environment (containers and both services); the classes run one after another. -->
+          <forkCount>1</forkCount>
+          <reuseForks>true</reuseForks>
+          <!-- A hung environment must not hang the build; CI has its own, larger limit. -->
+          <forkedProcessTimeoutInSeconds>1200</forkedProcessTimeoutInSeconds>
+          <systemPropertyVariables>
+            <e2e.order-service.jar>${e2e.order-service.jar}</e2e.order-service.jar>
+            <e2e.payment-service.jar>${e2e.payment-service.jar}</e2e.payment-service.jar>
+            <e2e.logs>${project.build.directory}/e2e-logs</e2e.logs>
+            <e2e.postgres-init>${project.basedir}/../infra/postgres/init</e2e.postgres-init>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+
+      <!-- Nothing here is production code: no coverage gate, no report. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <configuration>
+          <skip>true</skip>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <id>e2e</id>
+      <properties>
+        <e2e.skip>false</e2e.skip>
+      </properties>
+    </profile>
+  </profiles>
 </project>

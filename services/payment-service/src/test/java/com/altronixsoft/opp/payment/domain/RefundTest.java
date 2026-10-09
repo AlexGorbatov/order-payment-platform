@@ -194,7 +194,9 @@ class RefundTest {
                 at(7),
                 original.createdAt(),
                 at(8),
-                5L);
+                5L,
+                null,
+                null);
 
         assertThat(copy.version()).isEqualTo(5L);
         assertThat(copy.attempts()).isEqualTo(3);

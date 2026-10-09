@@ -56,6 +56,12 @@ class RefundEntity {
     @Column(name = "updated_at", nullable = false)
     Instant updatedAt;
 
+    @Column(name = "correlation_id")
+    UUID correlationId;
+
+    @Column(name = "caused_by_event_id")
+    UUID causedByEventId;
+
     @Version
     Long version;
 

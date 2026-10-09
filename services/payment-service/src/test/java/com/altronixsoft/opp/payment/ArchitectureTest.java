@@ -94,6 +94,16 @@ class ArchitectureTest {
             .allowEmptyShould(true);
 
     @ArchTest
+    static final ArchRule stripe_sdk_is_confined_to_its_adapter = noClasses()
+            .that()
+            .resideOutsideOfPackage("..payment.adapter.out.stripe..")
+            .should()
+            .dependOnClassesThat()
+            .resideInAPackage("com.stripe..")
+            .because("the port speaks the platform's own types; the SDK is an adapter detail (ADR-0012)")
+            .allowEmptyShould(true);
+
+    @ArchTest
     static final ArchRule jpa_entities_live_in_persistence_adapter = classes()
             .that()
             .areAnnotatedWith("jakarta.persistence.Entity")

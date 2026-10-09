@@ -136,6 +136,13 @@ Disputes set `disputed=true`.
 
 `REQUESTED` → `PENDING` (Stripe refund created) → `SUCCEEDED` | `FAILED`. Full refunds only. One refund per `refundRequestId` (unique).
 
+**Implementation notes (payment-service domain and persistence, T10).**
+- *Two kinds of change.* What Stripe **reports** (webhook, API response, reconciliation) goes through `Payment.applyStripeStatus(stripeStatus, observedAt, source)` and returns a `StripeOutcome`, never an exception: `APPLIED` (moved), `UNCHANGED` (current and consistent, same status — for example a second decline on an intent that never left `requires_payment_method`; the watermark `lastStripeEventAt` still advances) or `STALE_IGNORED` (older than the watermark, or not an allowed transition, which includes everything after a terminal status). `observedAt >= lastStripeEventAt` is deliberately inclusive: Stripe timestamps have one-second resolution, so a late `processing` in the same second as `succeeded` is rejected by the transition rule, not by the clock. What we **decide** (`create`, `attachPaymentIntent`, `markInitiationFailed`, `requestCancel`) are commands and throw `IllegalPaymentTransitionException` when the status does not fit. `requires_capture` raises `StripeConfigurationException` (retrying cannot help; alert), any other unmapped status `UnknownStripeStatusException`.
+- *Cancel.* Before a PaymentIntent exists `requestCancel` cancels on the spot (`CREATED → CANCELED`, source `LOCAL`). Afterwards it only sets `cancel_requested` and schedules the cancellation worker; the payment becomes `CANCELED` when Stripe reports it. A `PROCESSING` or `SUCCEEDED` payment cannot be cancelled (`NOT_CANCELABLE`): that race is the order service's late-payment compensation (F18).
+- *Work queue.* `next_attempt_at != null` means external work is due: PaymentIntent creation while `CREATED`, cancellation while `cancel_requested`, refund creation while `REQUESTED`, processing of a stored webhook event while `RECEIVED`/`FAILED`. `RetryPolicy` is `min(maxDelay, base · 2^(n−1))` reduced by up to `jitter` (default 2 s, cap 5 min, 8 attempts, 20 %); `scheduleRetry` counts the failure and returns `EXHAUSTED` after `maxAttempts`, whereupon the caller decides the terminal state (initiation → `INITIATION_FAILED`, refund → `FAILED`; a webhook event becomes `DEAD`). Reaching a status with nothing left to do clears the work.
+- *Claiming.* `claimDueBatch(status, now, limit)` is a native `SELECT … ORDER BY next_attempt_at, id LIMIT n FOR UPDATE SKIP LOCKED` and must run inside a transaction (`Propagation.MANDATORY`). The row locks end with that transaction, so a worker claims **and leases** in the same transaction (`leaseUntil(now + lease)`, save, commit), calls Stripe outside any transaction, and stores the result in a new one; a worker that dies leaves a lease that simply expires. A slow worker whose lease expired meets the optimistic lock when it reports.
+- *Uniqueness* is the database's, with named constraints that the adapter turns into `DuplicatePaymentException` / `DuplicateRefundException`: one payment per order (`payment_order_id_key`), one payment per PaymentIntent, one refund per `refundRequestId`, one per Stripe refund, and — so the money cannot go back twice when two requests race — at most one refund per payment that has not failed (`refund_one_open_per_payment`, a partial unique index). A `CHECK` requires a PaymentIntent from `REQUIRES_PAYMENT_METHOD` on, and `stripe_webhook_event.livemode` must be false.
+
 ## 6. Key Flows
 
 ### 6.1 Happy path
@@ -223,7 +230,7 @@ flowchart LR
   D -.-> P[Processor: SKIP LOCKED batch]
   P --> H{handler}
   H -- applied --> T[tx: aggregate + history + outbox]
-  H -- stale --> S1[PROCESSED, stale metric]
+  H -- stale --> S1[STALE_IGNORED, stale metric]
   H -- unknown type --> I[IGNORED]
   H -- error --> F[FAILED, backoff] --> P
   F -- max attempts --> DEAD[DEAD + alert]
@@ -376,7 +383,7 @@ Unknown event types are skipped (forward compatibility), not dead-lettered.
 - `payment(id, order_id UNIQUE, customer_id, amount_minor, currency, status, stripe_payment_intent_id UNIQUE, last_stripe_event_at, last_error_code, last_error_message, cancel_requested, cancel_sent_at, disputed, attempts, next_attempt_at, created_at, updated_at, version)`.
 - `refund(id, payment_id FK, refund_request_id UNIQUE, amount_minor, currency, reason, status, stripe_refund_id UNIQUE, failure_reason, attempts, next_attempt_at, created_at, updated_at, version)`.
 - `payment_status_history(id, payment_id, from_status, to_status, source STRIPE_API|WEBHOOK|RECONCILIATION|LOCAL, stripe_event_id, occurred_at)`.
-- `stripe_webhook_event(event_id PK, type, api_version, livemode, stripe_created_at, payload jsonb, status RECEIVED|PROCESSED|IGNORED|FAILED|DEAD, attempts, next_attempt_at, last_error, received_at, processed_at)`.
+- `stripe_webhook_event(event_id PK, type, api_version, livemode, stripe_created_at, payload jsonb, status RECEIVED|PROCESSED|IGNORED|STALE_IGNORED|FAILED|DEAD, attempts, next_attempt_at, last_error, received_at, processed_at)`.
 
 Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 24 h.
 

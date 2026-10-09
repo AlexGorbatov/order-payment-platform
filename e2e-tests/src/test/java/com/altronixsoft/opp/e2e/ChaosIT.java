@@ -78,7 +78,15 @@ class ChaosIT extends E2eTest {
         // no duplicates: one payment per order, one PaymentIntent per paid order, every event handled once
         assertThat(paymentsExistFor(orders)).isEqualTo(orderCount);
         for (Order order : orders) {
-            assertThat(stripe.paymentIntentsOf(order.id())).hasSize(cancelled.contains(order.id()) ? 0 : 1);
+            if (cancelled.contains(order.id())) {
+                // Either the cancellation won the race and no PaymentIntent was ever made, or the worker was first and
+                // the PaymentIntent was made and then cancelled: both are right, a live one or a second one is not.
+                assertThat(stripe.paymentIntentsOf(order.id()))
+                        .hasSizeLessThanOrEqualTo(1)
+                        .allSatisfy(pi -> assertThat(pi.status()).isEqualTo("canceled"));
+            } else {
+                assertThat(stripe.paymentIntentsOf(order.id())).hasSize(1);
+            }
             assertThat(Outbox.count(platform.ordersDb(), order.id(), "OrderCreated"))
                     .isEqualTo(1);
             assertThat(client.order(Actor.ADMIN, order.id()).status())

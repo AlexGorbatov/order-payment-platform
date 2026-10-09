@@ -36,6 +36,11 @@ opp:
     audience: payment-service
 
 platform:
+  dead-letters:
+    persister:
+      # Dead letters of the topic this service consumes, and only those: both services share the broker, and the starter's
+      # default (.*-dlt) would store the other service's dead letters in this database as well (architecture §7.4).
+      topic-pattern: 'order\.events\.v1-dlt'
   test-support:
     # POST /api/v1/test-support/**: confirms PaymentIntents with Stripe test payment methods. Off unless the `local` or
     # `stripe-test` profile turns it on; with the flag off the endpoint does not exist.

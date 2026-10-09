@@ -288,7 +288,7 @@ Business change and `outbox_event` row are written in one DB transaction (`Outbo
 HTTP semantics: same key + same hash ⇒ replay stored response (`Idempotent-Replayed: true`); same key + different hash ⇒ 422; in progress ⇒ 409 + `Retry-After`; 5xx ⇒ record removed so the client may retry.
 
 ### 7.4 Retries and dead letters
-Consumers: `ErrorHandlingDeserializer`; short blocking retry (2 × 200 ms) then non-blocking retry topics (1 s, 10 s, 60 s) then `<topic>-dlt`. Non-retryable (deserialization, validation, `NonRetryableEventException`) go straight to DLT. A DLT listener persists every dead letter to `dead_letter_message`; ops can list, replay (re-published through the outbox to the original topic, header `x-replay-of`), or resolve. Trade-off: retry topics break per-key ordering; accepted because consumers are order-tolerant (inbox + monotonic state machines) — ADR-0007.
+Consumers: `ErrorHandlingDeserializer`; short blocking retry (2 × 200 ms) then non-blocking retry topics (1 s, 10 s, 60 s) then `<topic>-dlt`. Non-retryable (deserialization, validation, `NonRetryableEventException`) go straight to DLT. A DLT listener persists every dead letter to `dead_letter_message`; ops can list, replay (re-published through the outbox to the original topic, header `x-replay-of`), or resolve. Trade-off: retry topics break per-key ordering; accepted because consumers are order-tolerant (inbox + monotonic state machines) — ADR-0007. Each service persists only the dead-letter topic of the topic it consumes (`platform.dead-letters.persister.topic-pattern`: `payment.events.v1-dlt` in order-service, `order.events.v1-dlt` in payment-service); the starter's default `.*-dlt` would store the other service's dead letters too, because both share the broker.
 
 ### 7.5 Ordering
 Partition key = `orderId` on both topics ⇒ per-order ordering within a topic. Cross-topic ordering is not guaranteed and not relied upon. Stripe webhook order is not guaranteed — handled in §8.3.
@@ -490,7 +490,9 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 | Architecture | layering rules | ArchUnit | — |
 | Manual demo | real Stripe test mode | docker compose + Stripe CLI | real Stripe |
 
-Global invariants asserted at the end of every E2E test: ≤ 1 succeeded PaymentIntent per order; payment amount = order total; no stuck outbox rows; no unexpected DEAD webhook events.
+Global invariants asserted at the end of every E2E test: ≤ 1 succeeded PaymentIntent per order; payment amount = order total; no stuck outbox rows; no unexpected DEAD webhook events or unattended dead letters; no money returned twice; every mutating Stripe call carries an idempotency key derived from local ids; order and payment states agree.
+
+**E2E implementation (T17).** The scenarios run both services as processes (`java -jar` of the jars the build produces) against Testcontainers PostgreSQL, Kafka and Keycloak and a stateful Stripe simulator on WireMock (PaymentIntents, refunds, idempotency keys, signed webhooks that can be held, dropped, reordered or duplicated). Chaos is real: `kill -9` of a service, `docker pause` of Kafka. They are a profile of their own (`-Pe2e`) and a CI job that needs `build`. Rationale, helpers, scenario catalogue and the failure-matrix coverage map: [testing.md](testing.md).
 
 ## 15. Failure Mode Matrix
 

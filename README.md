@@ -11,6 +11,7 @@ reconciliation, and Testcontainers-based tests that never need a real Stripe acc
 - [Architecture](docs/architecture.md) — scope, flows, state machines, contracts, data model, failure matrix
 - [Architecture Decision Records](docs/adr/)
 - [Local setup](docs/local-setup.md) — docker compose infrastructure, ports, dev accounts, tokens
+- [Testing](docs/testing.md) — the test pyramid, end-to-end and chaos scenarios, how to run them
 - [Backlog](docs/backlog.md)
 
 ## Build
@@ -22,6 +23,14 @@ Requires JDK 21. Maven is provided by the wrapper.
 ```
 
 Format code with `./mvnw spotless:apply`.
+
+The end-to-end and chaos scenarios (both services as processes, Docker required) are not part of `verify`; see
+[Testing](docs/testing.md):
+
+```bash
+./mvnw -DskipTests -DskipITs -Djacoco.skip=true package   # the jars of the services
+./mvnw -pl e2e-tests -am -Pe2e verify
+```
 
 ## Modules
 

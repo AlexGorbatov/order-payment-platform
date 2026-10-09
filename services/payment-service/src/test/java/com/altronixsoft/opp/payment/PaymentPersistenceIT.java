@@ -91,7 +91,7 @@ class PaymentPersistenceIT extends AbstractPersistenceIT {
         payment.applyStripeStatus("requires_action", at(2), PaymentStatusSource.WEBHOOK, "evt_a");
         payment.applyStripeStatus("processing", at(3), PaymentStatusSource.WEBHOOK, "evt_b");
         payment.applyStripeStatus("succeeded", at(4), PaymentStatusSource.WEBHOOK, "evt_c");
-        payment.markDisputed(at(5));
+        payment.markDisputed("dp_test_1", "fraudulent", at(5));
         payment.recordError("card_declined", "Your card was declined.", at(5));
 
         Payment saved = stored(payment);

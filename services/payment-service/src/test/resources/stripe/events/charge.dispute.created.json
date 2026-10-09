@@ -1,0 +1,25 @@
+{
+  "id": "{{EVENT_ID}}",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": {{CREATED}},
+  "data": {
+    "object": {
+      "id": "dp_synthetic_{{SUFFIX}}",
+      "object": "dispute",
+      "amount": {{AMOUNT}},
+      "currency": "{{CURRENCY}}",
+      "charge": "ch_synthetic_{{SUFFIX}}",
+      "payment_intent": "{{PAYMENT_INTENT_ID}}",
+      "reason": "fraudulent",
+      "status": "needs_response",
+      "created": {{CREATED}},
+      "livemode": {{LIVEMODE}},
+      "metadata": {}
+    }
+  },
+  "livemode": {{LIVEMODE}},
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "type": "charge.dispute.created"
+}

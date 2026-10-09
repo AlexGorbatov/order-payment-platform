@@ -1,0 +1,29 @@
+{
+  "id": "{{EVENT_ID}}",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": {{CREATED}},
+  "data": {
+    "object": {
+      "id": "{{PAYMENT_INTENT_ID}}",
+      "object": "payment_intent",
+      "amount": {{AMOUNT}},
+      "amount_received": 0,
+      "currency": "{{CURRENCY}}",
+      "status": "canceled",
+      "created": {{CREATED}},
+      "canceled_at": {{CREATED}},
+      "last_payment_error": null,
+      "cancellation_reason": "requested_by_customer",
+      "livemode": {{LIVEMODE}},
+      "metadata": {
+        "orderId": "{{ORDER_ID}}",
+        "paymentId": "{{PAYMENT_ID}}"
+      }
+    }
+  },
+  "livemode": {{LIVEMODE}},
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "type": "payment_intent.canceled"
+}

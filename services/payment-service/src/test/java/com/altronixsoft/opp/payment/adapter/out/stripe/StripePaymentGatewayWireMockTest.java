@@ -102,7 +102,13 @@ class StripePaymentGatewayWireMockTest {
     private PaymentGateway gateway(
             int maxNetworkRetries, Duration readTimeout, StripeProperties.CircuitBreakerProperties breaker) {
         StripeProperties properties = new StripeProperties(
-                API_KEY, stripe.baseUrl(), Duration.ofMillis(800), readTimeout, maxNetworkRetries, breaker);
+                API_KEY,
+                stripe.baseUrl(),
+                Duration.ofMillis(800),
+                readTimeout,
+                maxNetworkRetries,
+                breaker,
+                new StripeProperties.Webhook(java.util.List.of(), Duration.ofSeconds(300)));
         lastBreaker = StripeConfiguration.newCircuitBreaker(CircuitBreakerRegistry.ofDefaults(), breaker);
         return StripeConfiguration.newGateway(StripeConfiguration.newClient(properties), lastBreaker, meters);
     }
@@ -530,7 +536,8 @@ class StripePaymentGatewayWireMockTest {
                     Duration.ofMillis(500),
                     Duration.ofMillis(500),
                     0,
-                    defaultBreaker());
+                    defaultBreaker(),
+                    new StripeProperties.Webhook(java.util.List.of(), Duration.ofSeconds(300)));
             PaymentGateway gateway = StripeConfiguration.newGateway(
                     StripeConfiguration.newClient(properties),
                     StripeConfiguration.newCircuitBreaker(CircuitBreakerRegistry.ofDefaults(), defaultBreaker()),

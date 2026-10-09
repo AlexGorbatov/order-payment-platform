@@ -172,8 +172,13 @@ public final class StripeWebhookEvent {
         return RetryDecision.RETRY_SCHEDULED;
     }
 
+    /** Whether the event still waits to be processed ({@code RECEIVED} or {@code FAILED}). */
+    public boolean isOpen() {
+        return status == WebhookEventStatus.RECEIVED || status == WebhookEventStatus.FAILED;
+    }
+
     private void requireOpen() {
-        if (status != WebhookEventStatus.RECEIVED && status != WebhookEventStatus.FAILED) {
+        if (!isOpen()) {
             throw new IllegalStateException("Webhook event " + eventId + " is already " + status);
         }
     }

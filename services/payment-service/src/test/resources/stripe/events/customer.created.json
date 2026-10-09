@@ -1,0 +1,19 @@
+{
+  "id": "{{EVENT_ID}}",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": {{CREATED}},
+  "data": {
+    "object": {
+      "id": "cus_synthetic_{{SUFFIX}}",
+      "object": "customer",
+      "created": {{CREATED}},
+      "livemode": {{LIVEMODE}},
+      "metadata": {}
+    }
+  },
+  "livemode": {{LIVEMODE}},
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "type": "customer.created"
+}

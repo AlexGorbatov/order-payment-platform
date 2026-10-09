@@ -31,6 +31,7 @@ final class PaymentMapper {
                 entity.stripePaymentIntentId,
                 entity.lastStripeEventAt,
                 entity.lastErrorCode,
+                entity.lastDeclineCode,
                 entity.lastErrorMessage,
                 entity.cancelRequested,
                 entity.cancelSentAt,
@@ -69,6 +70,7 @@ final class PaymentMapper {
         entity.stripePaymentIntentId = payment.stripePaymentIntentId();
         entity.lastStripeEventAt = payment.lastStripeEventAt();
         entity.lastErrorCode = payment.lastErrorCode();
+        entity.lastDeclineCode = payment.lastDeclineCode();
         entity.lastErrorMessage = payment.lastErrorMessage();
         entity.cancelRequested = payment.cancelRequested();
         entity.cancelSentAt = payment.cancelSentAt();

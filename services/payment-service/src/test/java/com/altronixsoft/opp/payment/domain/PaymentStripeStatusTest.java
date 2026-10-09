@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -242,7 +243,12 @@ class PaymentStripeStatusTest {
     void aRefundMovesOnlyASucceededPayment(PaymentStatus from) {
         Payment payment = inStatus(from);
 
-        StripeOutcome outcome = payment.markRefunded(at(30), PaymentStatusSource.WEBHOOK, "evt_refunded");
+        StripeOutcome outcome = payment.markRefunded(
+                UUID.fromString("0199e0a0-7777-7000-8000-000000000007"),
+                "re_test_1",
+                at(30),
+                PaymentStatusSource.WEBHOOK,
+                "evt_refunded");
 
         assertThat(outcome)
                 .isEqualTo(
@@ -258,7 +264,12 @@ class PaymentStripeStatusTest {
     void anOlderRefundReportIsStale() {
         Payment payment = inStatus(PaymentStatus.SUCCEEDED);
 
-        assertThat(payment.markRefunded(at(9), PaymentStatusSource.WEBHOOK, "evt_old"))
+        assertThat(payment.markRefunded(
+                        UUID.fromString("0199e0a0-7777-7000-8000-000000000007"),
+                        "re_test_1",
+                        at(9),
+                        PaymentStatusSource.WEBHOOK,
+                        "evt_old"))
                 .isEqualTo(StripeOutcome.STALE_IGNORED);
         assertThat(payment.status()).isEqualTo(PaymentStatus.SUCCEEDED);
     }

@@ -75,7 +75,12 @@ public final class PaymentFixtures {
             case REFUNDED -> {
                 payment.attachPaymentIntent(PI, at(5));
                 payment.applyStripeStatus("succeeded", at(8), PaymentStatusSource.WEBHOOK);
-                payment.markRefunded(at(10), PaymentStatusSource.WEBHOOK, "evt_refund");
+                payment.markRefunded(
+                        UUID.fromString("0199e0a0-7777-7000-8000-000000000007"),
+                        "re_test_1",
+                        at(10),
+                        PaymentStatusSource.WEBHOOK,
+                        "evt_refund");
             }
         }
         return payment;

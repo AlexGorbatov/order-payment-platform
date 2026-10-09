@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -53,7 +54,12 @@ class PaymentStateMachineExhaustiveTest {
 
     private static StripeOutcome send(Payment payment, int kind, Instant at) {
         return kind == REFUND
-                ? payment.markRefunded(at, PaymentStatusSource.WEBHOOK, "evt")
+                ? payment.markRefunded(
+                        UUID.fromString("0199e0a0-7777-7000-8000-000000000007"),
+                        "re_test_1",
+                        at,
+                        PaymentStatusSource.WEBHOOK,
+                        "evt")
                 : payment.applyStripeStatus(STATUSES[kind], at, PaymentStatusSource.WEBHOOK, "evt");
     }
 

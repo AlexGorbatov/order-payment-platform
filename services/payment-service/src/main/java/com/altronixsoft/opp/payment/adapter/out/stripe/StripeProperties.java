@@ -1,6 +1,7 @@
 package com.altronixsoft.opp.payment.adapter.out.stripe;
 
 import java.time.Duration;
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
@@ -15,6 +16,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *     {@code (maxNetworkRetries + 1)} times this
  * @param maxNetworkRetries retries by the SDK on connection errors, timeouts, 409 and 5xx, always with the same
  *     idempotency key
+ * @param webhook verification of incoming webhooks
  */
 @ConfigurationProperties("stripe")
 public record StripeProperties(
@@ -23,7 +25,35 @@ public record StripeProperties(
         @DefaultValue("5s") Duration connectTimeout,
         @DefaultValue("15s") Duration readTimeout,
         @DefaultValue("2") int maxNetworkRetries,
-        @DefaultValue CircuitBreakerProperties circuitBreaker) {
+        @DefaultValue CircuitBreakerProperties circuitBreaker,
+        @DefaultValue Webhook webhook) {
+
+    /**
+     * Webhook signature verification (architecture §8.3, ADR-0009). Secrets come from the environment only
+     * ({@code STRIPE_WEBHOOK_SECRET}, comma-separated) and are never logged.
+     *
+     * @param signingSecrets every secret currently valid for the endpoint: one normally, two while a secret is rolled
+     *     (Stripe signs with each until the old one expires). Empty: every webhook is refused.
+     * @param tolerance how old the signed timestamp may be: older requests are replays and are refused (F12)
+     */
+    public record Webhook(
+            @DefaultValue List<String> signingSecrets,
+            @DefaultValue("300s") Duration tolerance) {
+
+        public Webhook {
+            signingSecrets = signingSecrets == null
+                    ? List.of()
+                    : signingSecrets.stream()
+                            .filter(secret -> secret != null && !secret.isBlank())
+                            .map(String::strip)
+                            .toList();
+        }
+
+        @Override
+        public String toString() {
+            return "Webhook[signingSecrets=<" + signingSecrets.size() + " redacted>, tolerance=" + tolerance + "]";
+        }
+    }
 
     /**
      * The circuit breaker around the gateway. Only {@code TRANSIENT} failures count (architecture §8.2): a rejected
@@ -46,6 +76,6 @@ public record StripeProperties(
     public String toString() {
         return "StripeProperties[apiKey=<redacted>, apiBase=" + apiBase + ", connectTimeout=" + connectTimeout
                 + ", readTimeout=" + readTimeout + ", maxNetworkRetries=" + maxNetworkRetries + ", circuitBreaker="
-                + circuitBreaker + "]";
+                + circuitBreaker + ", webhook=" + webhook + "]";
     }
 }

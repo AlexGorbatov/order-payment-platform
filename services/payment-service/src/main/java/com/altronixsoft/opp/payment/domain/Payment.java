@@ -31,6 +31,13 @@ import java.util.random.RandomGenerator;
  * {@link #attachPaymentIntent}, {@link #markCancelSent} or a Stripe status. Reaching a status with nothing left to do
  * clears the work.
  *
+ * <h2>Events</h2>
+ *
+ * Every change the order or an operator must hear about registers a {@link PaymentDomainEvent}, whatever reported it
+ * (webhook, API response, reconciliation): reaching {@code REQUIRES_ACTION}, {@code SUCCEEDED} or {@code CANCELED}, a
+ * failed attempt, a refund outcome, a dispute. A report that changes nothing registers nothing, so a duplicate never
+ * becomes a second event.
+ *
  * <p>Concurrency is the repository's business ({@code version}); the aggregate itself is not thread-safe.
  */
 public final class Payment {
@@ -52,6 +59,7 @@ public final class Payment {
     private String stripePaymentIntentId;
     private Instant lastStripeEventAt;
     private String lastErrorCode;
+    private String lastDeclineCode;
     private String lastErrorMessage;
     private boolean cancelRequested;
     private Instant cancelSentAt;
@@ -69,6 +77,7 @@ public final class Payment {
             String stripePaymentIntentId,
             Instant lastStripeEventAt,
             String lastErrorCode,
+            String lastDeclineCode,
             String lastErrorMessage,
             boolean cancelRequested,
             Instant cancelSentAt,
@@ -89,6 +98,7 @@ public final class Payment {
         this.stripePaymentIntentId = stripePaymentIntentId;
         this.lastStripeEventAt = lastStripeEventAt;
         this.lastErrorCode = lastErrorCode;
+        this.lastDeclineCode = lastDeclineCode;
         this.lastErrorMessage = lastErrorMessage;
         this.cancelRequested = cancelRequested;
         this.cancelSentAt = cancelSentAt;
@@ -147,6 +157,7 @@ public final class Payment {
                 null,
                 null,
                 null,
+                null,
                 false,
                 null,
                 false,
@@ -172,6 +183,7 @@ public final class Payment {
             String stripePaymentIntentId,
             Instant lastStripeEventAt,
             String lastErrorCode,
+            String lastDeclineCode,
             String lastErrorMessage,
             boolean cancelRequested,
             Instant cancelSentAt,
@@ -193,6 +205,7 @@ public final class Payment {
                 stripePaymentIntentId,
                 lastStripeEventAt,
                 lastErrorCode,
+                lastDeclineCode,
                 lastErrorMessage,
                 cancelRequested,
                 cancelSentAt,
@@ -227,15 +240,112 @@ public final class Payment {
      */
     public StripeOutcome applyStripeStatus(
             String stripeStatus, Instant observedAt, PaymentStatusSource source, String stripeEventId) {
-        return applyStatus(StripePaymentIntentStatus.toPaymentStatus(stripeStatus), observedAt, source, stripeEventId);
+        return applyStripeStatus(stripeStatus, observedAt, source, stripeEventId, null);
+    }
+
+    /**
+     * Same as above, with the PaymentIntent's {@code cancellation_reason}, which a {@code CANCELED} payment reports in
+     * its event.
+     *
+     * @param cancellationReason Stripe's reason ({@code abandoned}, {@code requested_by_customer}, ...); {@code null} is
+     *     reported as {@code canceled}
+     */
+    public StripeOutcome applyStripeStatus(
+            String stripeStatus,
+            Instant observedAt,
+            PaymentStatusSource source,
+            String stripeEventId,
+            String cancellationReason) {
+        StripeOutcome outcome =
+                applyStatus(StripePaymentIntentStatus.toPaymentStatus(stripeStatus), observedAt, source, stripeEventId);
+        if (outcome == StripeOutcome.APPLIED) {
+            switch (status) {
+                case REQUIRES_ACTION ->
+                    domainEvents.add(new PaymentDomainEvent.ActionRequired(id, orderId, observedAt));
+                case SUCCEEDED ->
+                    domainEvents.add(
+                            new PaymentDomainEvent.Succeeded(id, orderId, amount, stripePaymentIntentId, observedAt));
+                case CANCELED ->
+                    domainEvents.add(new PaymentDomainEvent.Canceled(
+                            id,
+                            orderId,
+                            cancellationReason == null || cancellationReason.isBlank()
+                                    ? "canceled"
+                                    : cancellationReason,
+                            observedAt));
+                default -> {
+                    // PROCESSING and REQUIRES_PAYMENT_METHOD are not announced (architecture §9.3)
+                }
+            }
+        }
+        return outcome;
+    }
+
+    /**
+     * A payment attempt failed ({@code payment_intent.payment_failed}): the PaymentIntent is back at, or still at,
+     * {@code requires_payment_method} and the customer may try another payment method (architecture §6.2). Unless the
+     * report is stale, the error is remembered and {@code AttemptFailed} is registered, also when the status did not
+     * move: every failed attempt is news, a repeated report of the same status is not.
+     *
+     * @param errorCode the provider's code ({@code card_declined}); {@code null} becomes {@code payment_failed}
+     * @param declineCode the card network's reason, already sanitized; may be {@code null}
+     * @param message the provider's message for the customer, already sanitized; may be {@code null}
+     */
+    public StripeOutcome recordPaymentFailure(
+            String stripeStatus,
+            String errorCode,
+            String declineCode,
+            String message,
+            Instant observedAt,
+            PaymentStatusSource source,
+            String stripeEventId) {
+        StripeOutcome outcome =
+                applyStatus(StripePaymentIntentStatus.toPaymentStatus(stripeStatus), observedAt, source, stripeEventId);
+        if (outcome == StripeOutcome.STALE_IGNORED) {
+            return outcome;
+        }
+        String code = errorCode == null || errorCode.isBlank() ? "payment_failed" : errorCode;
+        String decline = declineCode == null || declineCode.isBlank() ? null : declineCode;
+        lastErrorCode = code;
+        lastDeclineCode = decline;
+        lastErrorMessage = truncate(message);
+        updatedAt = observedAt;
+        domainEvents.add(new PaymentDomainEvent.AttemptFailed(id, orderId, code, decline, observedAt));
+        return outcome;
     }
 
     /**
      * The full refund succeeded ({@code charge.refunded}): {@code SUCCEEDED → REFUNDED}, under the same ordering rule
-     * as a PaymentIntent status.
+     * as a PaymentIntent status. When it applies, {@code Refunded} is registered with the refund's ids.
      */
-    public StripeOutcome markRefunded(Instant observedAt, PaymentStatusSource source, String stripeEventId) {
-        return applyStatus(PaymentStatus.REFUNDED, observedAt, source, stripeEventId);
+    public StripeOutcome markRefunded(
+            UUID refundRequestId,
+            String stripeRefundId,
+            Instant observedAt,
+            PaymentStatusSource source,
+            String stripeEventId) {
+        Objects.requireNonNull(refundRequestId, "refundRequestId");
+        if (stripeRefundId == null || stripeRefundId.isBlank()) {
+            throw new IllegalArgumentException("stripeRefundId must not be blank");
+        }
+        StripeOutcome outcome = applyStatus(PaymentStatus.REFUNDED, observedAt, source, stripeEventId);
+        if (outcome == StripeOutcome.APPLIED) {
+            domainEvents.add(
+                    new PaymentDomainEvent.Refunded(id, orderId, refundRequestId, stripeRefundId, amount, observedAt));
+        }
+        return outcome;
+    }
+
+    /**
+     * A refund of this payment failed at Stripe ({@code refund.failed}). The payment keeps its status (the money was
+     * never returned); {@code RefundFailed} lets the order show it and an administrator retry (F20).
+     */
+    public void recordRefundFailure(UUID refundRequestId, String failureReason, Instant now) {
+        Objects.requireNonNull(refundRequestId, "refundRequestId");
+        Objects.requireNonNull(now, "now");
+        String reason = failureReason == null || failureReason.isBlank() ? "unknown" : failureReason;
+        updatedAt = now;
+        domainEvents.add(new PaymentDomainEvent.RefundFailed(id, orderId, refundRequestId, reason, now));
     }
 
     private StripeOutcome applyStatus(
@@ -262,17 +372,24 @@ public final class Payment {
     }
 
     /**
-     * A PaymentIntent was disputed. Sets the flag in any status; repeating it does nothing.
+     * A PaymentIntent was disputed ({@code charge.dispute.created}). Sets the flag in any status and registers
+     * {@code Disputed}; repeating it does nothing.
      *
+     * @param reason Stripe's dispute reason; {@code null} is reported as {@code general}
      * @return whether the flag changed
      */
-    public boolean markDisputed(Instant now) {
+    public boolean markDisputed(String disputeId, String reason, Instant now) {
         Objects.requireNonNull(now, "now");
+        if (disputeId == null || disputeId.isBlank()) {
+            throw new IllegalArgumentException("disputeId must not be blank");
+        }
         if (disputed) {
             return false;
         }
         disputed = true;
         updatedAt = now;
+        domainEvents.add(new PaymentDomainEvent.Disputed(
+                id, orderId, disputeId, reason == null || reason.isBlank() ? "general" : reason, now));
         return true;
     }
 
@@ -280,6 +397,7 @@ public final class Payment {
     public void recordError(String code, String message, Instant now) {
         Objects.requireNonNull(now, "now");
         lastErrorCode = code;
+        lastDeclineCode = null;
         lastErrorMessage = truncate(message);
         updatedAt = now;
     }
@@ -313,6 +431,7 @@ public final class Payment {
         Objects.requireNonNull(now, "now");
         requireStatus(PaymentStatus.CREATED, "fail its initiation");
         lastErrorCode = errorCode;
+        lastDeclineCode = null;
         lastErrorMessage = truncate(errorMessage);
         moveTo(PaymentStatus.INITIATION_FAILED, PaymentStatusSource.LOCAL, null, now);
         domainEvents.add(new PaymentDomainEvent.InitiationFailed(
@@ -389,6 +508,7 @@ public final class Payment {
         Objects.requireNonNull(random, "random");
         attempts++;
         lastErrorCode = errorCode;
+        lastDeclineCode = null;
         lastErrorMessage = truncate(errorMessage);
         updatedAt = now;
         if (policy.isExhaustedAfter(attempts)) {
@@ -465,6 +585,11 @@ public final class Payment {
 
     public String lastErrorCode() {
         return lastErrorCode;
+    }
+
+    /** The card network's reason of the latest failed attempt ({@code insufficient_funds}); may be {@code null}. */
+    public String lastDeclineCode() {
+        return lastDeclineCode;
     }
 
     public String lastErrorMessage() {

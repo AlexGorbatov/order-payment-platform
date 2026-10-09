@@ -48,6 +48,7 @@ class InMemoryPayments implements PaymentRepository, FakeTransactions.Rollbackab
                 p.stripePaymentIntentId(),
                 p.lastStripeEventAt(),
                 p.lastErrorCode(),
+                p.lastDeclineCode(),
                 p.lastErrorMessage(),
                 p.cancelRequested(),
                 p.cancelSentAt(),

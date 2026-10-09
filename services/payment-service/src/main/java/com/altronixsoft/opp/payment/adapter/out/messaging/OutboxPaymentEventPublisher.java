@@ -1,9 +1,16 @@
 package com.altronixsoft.opp.payment.adapter.out.messaging;
 
 import com.altronixsoft.opp.contracts.EventEnvelope;
+import com.altronixsoft.opp.contracts.PaymentActionRequired;
+import com.altronixsoft.opp.contracts.PaymentAttemptFailed;
+import com.altronixsoft.opp.contracts.PaymentCanceled;
+import com.altronixsoft.opp.contracts.PaymentDisputed;
 import com.altronixsoft.opp.contracts.PaymentEvent;
 import com.altronixsoft.opp.contracts.PaymentInitiated;
 import com.altronixsoft.opp.contracts.PaymentInitiationFailed;
+import com.altronixsoft.opp.contracts.PaymentRefundFailed;
+import com.altronixsoft.opp.contracts.PaymentRefunded;
+import com.altronixsoft.opp.contracts.PaymentSucceeded;
 import com.altronixsoft.opp.contracts.Topics;
 import com.altronixsoft.opp.payment.application.PaymentEventPublisher;
 import com.altronixsoft.opp.payment.domain.PaymentDomainEvent;
@@ -47,6 +54,33 @@ class OutboxPaymentEventPublisher implements PaymentEventPublisher {
                 new PaymentInitiated(initiated.paymentId(), initiated.orderId(), initiated.stripePaymentIntentId());
             case PaymentDomainEvent.InitiationFailed failed ->
                 new PaymentInitiationFailed(failed.paymentId(), failed.orderId(), failed.errorCode());
+            case PaymentDomainEvent.ActionRequired required ->
+                new PaymentActionRequired(required.paymentId(), required.orderId());
+            case PaymentDomainEvent.AttemptFailed failed ->
+                new PaymentAttemptFailed(
+                        failed.paymentId(), failed.orderId(), failed.errorCode(), failed.declineCode());
+            case PaymentDomainEvent.Succeeded succeeded ->
+                new PaymentSucceeded(
+                        succeeded.paymentId(),
+                        succeeded.orderId(),
+                        succeeded.amount().amountMinor(),
+                        succeeded.amount().currencyCode(),
+                        succeeded.stripePaymentIntentId(),
+                        succeeded.occurredAt());
+            case PaymentDomainEvent.Canceled canceled ->
+                new PaymentCanceled(canceled.paymentId(), canceled.orderId(), canceled.reason());
+            case PaymentDomainEvent.Refunded refunded ->
+                new PaymentRefunded(
+                        refunded.paymentId(),
+                        refunded.orderId(),
+                        refunded.refundRequestId(),
+                        refunded.stripeRefundId(),
+                        refunded.amount().amountMinor());
+            case PaymentDomainEvent.RefundFailed failed ->
+                new PaymentRefundFailed(
+                        failed.paymentId(), failed.orderId(), failed.refundRequestId(), failed.failureReason());
+            case PaymentDomainEvent.Disputed disputed ->
+                new PaymentDisputed(disputed.paymentId(), disputed.orderId(), disputed.disputeId(), disputed.reason());
         };
     }
 }

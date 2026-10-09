@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.altronixsoft.opp.payment.application.OrderEventCommand.Outcome;
 import com.altronixsoft.opp.payment.domain.Payment;
+import com.altronixsoft.opp.payment.domain.PaymentDomainEvent;
 import com.altronixsoft.opp.payment.domain.PaymentFixtures;
 import com.altronixsoft.opp.payment.domain.PaymentStatus;
 import com.altronixsoft.opp.payment.domain.Refund;
@@ -26,6 +27,7 @@ class ApplyOrderEventServiceTest {
 
     private final InMemoryPayments payments = new InMemoryPayments();
     private final InMemoryRefunds refunds = new InMemoryRefunds();
+    private final RecordingEvents events = new RecordingEvents();
     private final AtomicInteger sequence = new AtomicInteger();
     private final IdGenerator ids =
             () -> new UUID(0x0199e0a044447000L, 0x8000000000000000L + sequence.incrementAndGet());
@@ -33,7 +35,8 @@ class ApplyOrderEventServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ApplyOrderEventService(payments, refunds, ids, Clock.fixed(T0.plusSeconds(60), ZoneOffset.UTC));
+        service = new ApplyOrderEventService(
+                payments, refunds, events, ids, Clock.fixed(T0.plusSeconds(60), ZoneOffset.UTC));
     }
 
     private OrderEventCommand created() {
@@ -80,7 +83,15 @@ class ApplyOrderEventServiceTest {
 
         assertThat(service.apply(cancelled())).isEqualTo(OrderEventResult.PAYMENT_CANCELED);
 
-        assertThat(payments.all().getFirst().status()).isEqualTo(PaymentStatus.CANCELED);
+        Payment payment = payments.all().getFirst();
+        assertThat(payment.status()).isEqualTo(PaymentStatus.CANCELED);
+        assertThat(events.published).singleElement().satisfies(published -> {
+            assertThat(published.event())
+                    .isEqualTo(new PaymentDomainEvent.Canceled(
+                            payment.id(), ORDER, "canceled_before_payment_intent", T0.plusSeconds(60)));
+            assertThat(published.correlationId()).isEqualTo(CORRELATION);
+            assertThat(published.causationId()).isEqualTo(EVENT);
+        });
     }
 
     @Test
@@ -149,12 +160,36 @@ class ApplyOrderEventServiceTest {
     }
 
     @Test
-    void aRefundForAPaymentThatIsNotSucceededIsRejected() {
-        payments.add(PaymentFixtures.withPaymentIntent());
+    void aRefundForAPaymentThatWasNotPaidFailsVisibly() {
+        Payment payment = payments.add(PaymentFixtures.withPaymentIntent());
+        UUID requestId = UUID.randomUUID();
 
-        assertThatThrownBy(() -> service.apply(refundRequested(UUID.randomUUID(), 3097)))
-                .isInstanceOf(UnexpectedOrderEventException.class);
-        assertThat(refunds.stored).isEmpty();
+        assertThat(service.apply(refundRequested(requestId, 3097))).isEqualTo(OrderEventResult.REFUND_FAILED);
+
+        Refund refund = refunds.findByRefundRequestId(requestId).orElseThrow();
+        assertThat(refund.status()).isEqualTo(RefundStatus.FAILED);
+        assertThat(refund.failureReason()).isEqualTo("payment_not_succeeded");
+        assertThat(refund.nextAttemptAt()).as("nothing for the refund worker").isNull();
+        assertThat(events.published).singleElement().satisfies(published -> {
+            assertThat(published.event())
+                    .isEqualTo(new PaymentDomainEvent.RefundFailed(
+                            payment.id(), ORDER, requestId, "payment_not_succeeded", T0.plusSeconds(60)));
+            assertThat(published.causationId()).isEqualTo(EVENT);
+        });
+        assertThat(service.apply(refundRequested(requestId, 3097)))
+                .as("F22: the same request again changes nothing")
+                .isEqualTo(OrderEventResult.REFUND_ALREADY_REQUESTED);
+    }
+
+    @Test
+    void aRefundForARefundedPaymentFailsAsAlreadyRefunded() {
+        payments.add(PaymentFixtures.inStatus(PaymentStatus.REFUNDED));
+        UUID requestId = UUID.randomUUID();
+
+        assertThat(service.apply(refundRequested(requestId, 3097))).isEqualTo(OrderEventResult.REFUND_FAILED);
+
+        assertThat(refunds.findByRefundRequestId(requestId).orElseThrow().failureReason())
+                .isEqualTo("already_refunded");
     }
 
     @Test

@@ -249,8 +249,8 @@ class StripePaymentGatewayWireMockTest {
                             .withBody(refundJson("pending"))));
 
             GatewayRefund refund = gateway(2)
-                    .createRefund(
-                            new CreateRefundRequest(REFUND_ID, PAYMENT_ID, "pi_3PwmABCDEF", Money.of(3097, "EUR")));
+                    .createRefund(new CreateRefundRequest(
+                            REFUND_ID, PAYMENT_ID, ORDER_ID, "pi_3PwmABCDEF", Money.of(3097, "EUR")));
 
             LoggedRequest sent = requests().getFirst();
             assertThat(sent.getHeader("Idempotency-Key")).isEqualTo("refund:" + REFUND_ID);
@@ -723,7 +723,7 @@ class StripePaymentGatewayWireMockTest {
                             PaymentGatewayException.class,
                             e -> assertThat(e.circuitOpen()).isTrue());
             assertThatThrownBy(() -> gateway.createRefund(
-                            new CreateRefundRequest(REFUND_ID, PAYMENT_ID, "pi_x", Money.of(1, "EUR"))))
+                            new CreateRefundRequest(REFUND_ID, PAYMENT_ID, ORDER_ID, "pi_x", Money.of(1, "EUR"))))
                     .isInstanceOfSatisfying(
                             PaymentGatewayException.class,
                             e -> assertThat(e.circuitOpen()).isTrue());
@@ -799,7 +799,7 @@ class StripePaymentGatewayWireMockTest {
             gateway.confirmPaymentIntentForTest(
                     new ConfirmPaymentIntentRequest(PAYMENT_ID, "pi_3PwmABCDEF", "pm_card_visa", UUID.randomUUID()));
             gateway.createRefund(
-                    new CreateRefundRequest(REFUND_ID, PAYMENT_ID, "pi_3PwmABCDEF", Money.of(3097, "EUR")));
+                    new CreateRefundRequest(REFUND_ID, PAYMENT_ID, ORDER_ID, "pi_3PwmABCDEF", Money.of(3097, "EUR")));
 
             assertThat(meters.find("stripe.api.latency").timers())
                     .extracting(t -> t.getId().getTag("operation"))

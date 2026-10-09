@@ -1,5 +1,7 @@
 package com.altronixsoft.opp.payment.config;
 
+import com.altronixsoft.opp.payment.application.WorkerSettings;
+import com.altronixsoft.opp.payment.domain.RetryPolicy;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -9,10 +11,15 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *
  * @param initiation the PaymentInitiationWorker
  * @param webhookProcessor the WebhookProcessor
+ * @param cancellation the PaymentCancellationWorker
+ * @param refund the RefundWorker
  */
 @ConfigurationProperties("payment")
 record PaymentProperties(
-        @DefaultValue Initiation initiation, @DefaultValue WebhookProcessor webhookProcessor) {
+        @DefaultValue Initiation initiation,
+        @DefaultValue WebhookProcessor webhookProcessor,
+        @DefaultValue Worker cancellation,
+        @DefaultValue Worker refund) {
 
     /**
      * Creates the PaymentIntent of payments waiting in {@code CREATED} (architecture §6.1, ADR-0008).
@@ -42,6 +49,42 @@ record PaymentProperties(
             @DefaultValue("8") int retryMaxAttempts,
             @DefaultValue("0.2") double retryJitter,
             @DefaultValue("30s") Duration deferral) {}
+
+    /**
+     * A DB-backed worker that calls Stripe (architecture §7.6, ADR-0008): the PaymentCancellationWorker
+     * ({@code payment.cancellation}) and the RefundWorker ({@code payment.refund}).
+     *
+     * @param enabled whether the scheduled worker runs; the bean that does the work exists either way
+     * @param interval delay between the end of one run and the start of the next
+     * @param initialDelay delay before the first run
+     * @param batchSize items claimed per run
+     * @param lease how long a claimed item is not due again; must exceed the Stripe calls of a whole batch
+     * @param retryBaseDelay delay after the first transient failure
+     * @param retryMaxDelay upper bound of the backoff
+     * @param retryMaxAttempts transient failures after which the worker gives up on the item
+     * @param retryJitter fraction of the backoff that may be shaved off at random
+     * @param deferral wait after a failure that is not the item's fault (open circuit breaker, configuration problem)
+     */
+    record Worker(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("2s") Duration interval,
+            @DefaultValue("5s") Duration initialDelay,
+            @DefaultValue("10") int batchSize,
+            @DefaultValue("5m") Duration lease,
+            @DefaultValue("2s") Duration retryBaseDelay,
+            @DefaultValue("5m") Duration retryMaxDelay,
+            @DefaultValue("8") int retryMaxAttempts,
+            @DefaultValue("0.2") double retryJitter,
+            @DefaultValue("30s") Duration deferral) {
+
+        WorkerSettings settings() {
+            return new WorkerSettings(
+                    batchSize,
+                    lease,
+                    new RetryPolicy(retryBaseDelay, retryMaxDelay, retryMaxAttempts, retryJitter),
+                    deferral);
+        }
+    }
 
     /**
      * Processes the stored Stripe webhook events (architecture §6.6, ADR-0009).

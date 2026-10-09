@@ -50,6 +50,14 @@ payment:
     lease: 5m
     # Stripe forgets idempotency keys after at least 24 h; a payment older than this is failed, not retried (F08)
     idempotency-window: 23h
+  cancellation:
+    # the PaymentCancellationWorker (architecture §6.4): cancels the PaymentIntent of cancelled orders
+    enabled: true
+    interval: 2s
+  refund:
+    # the RefundWorker (architecture §6.5): creates the requested refunds at Stripe
+    enabled: true
+    interval: 2s
   webhook-processor:
     # the WebhookProcessor (architecture §6.6): applies stored Stripe webhooks; DEAD after max attempts (F14)
     enabled: true

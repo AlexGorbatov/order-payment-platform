@@ -6,8 +6,8 @@ import com.altronixsoft.opp.payment.domain.Payment;
 import com.altronixsoft.opp.payment.domain.PaymentStatus;
 import com.altronixsoft.opp.payment.domain.Refund;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -18,6 +18,10 @@ import org.springframework.transaction.annotation.Transactional;
  * calls Stripe (ADR-0008). The workers pick the work up from the database: the payment is created {@code CREATED} and due
  * at once for {@code PaymentInitiationWorker}; a cancellation sets {@code cancel_requested} for the cancellation worker; a
  * refund is created {@code REQUESTED} for the refund worker.
+ *
+ * <p>A payment still {@code CREATED} is cancelled on the spot and {@code PaymentCanceled} is published. A refund for a
+ * payment that is not {@code SUCCEEDED} (nothing was paid, or it is already refunded) is recorded as a {@code FAILED}
+ * refund and {@code PaymentRefundFailed} is published, so the order shows {@code REFUND_FAILED} instead of waiting.
  *
  * <p>The caller runs this inside the inbox transaction, so a redelivered event never reaches it twice. A <em>different</em>
  * event that repeats the same business fact (a replay from the dead-letter topic, a second event for the same order or
@@ -30,12 +34,19 @@ public class ApplyOrderEventService {
 
     private final PaymentRepository payments;
     private final RefundRepository refunds;
+    private final PaymentEventPublisher events;
     private final IdGenerator ids;
     private final Clock clock;
 
-    public ApplyOrderEventService(PaymentRepository payments, RefundRepository refunds, IdGenerator ids, Clock clock) {
+    public ApplyOrderEventService(
+            PaymentRepository payments,
+            RefundRepository refunds,
+            PaymentEventPublisher events,
+            IdGenerator ids,
+            Clock clock) {
         this.payments = payments;
         this.refunds = refunds;
+        this.events = events;
         this.ids = ids;
         this.clock = clock;
     }
@@ -43,7 +54,7 @@ public class ApplyOrderEventService {
     /**
      * @throws PaymentNotFoundException a cancellation or refund for an order without a payment: the {@code OrderCreated}
      *     may still be in flight on a retry topic, so the platform retries; if it never arrives, the event is dead-lettered
-     * @throws UnexpectedOrderEventException a refund the payment's state cannot explain
+     * @throws UnexpectedOrderEventException a refund whose amount is not the payment's (only full refunds exist)
      * @throws PaymentConcurrentlyModifiedException the payment changed concurrently; retrying sees the new state
      */
     @Transactional
@@ -86,6 +97,7 @@ public class ApplyOrderEventService {
         return switch (request) {
             case CANCELED_LOCALLY -> {
                 payments.save(payment);
+                events.publish(payment.pullDomainEvents(), command.correlationId(), command.eventId());
                 yield OrderEventResult.PAYMENT_CANCELED;
             }
             case CANCEL_SCHEDULED -> {
@@ -107,28 +119,39 @@ public class ApplyOrderEventService {
                     command.eventId());
             return OrderEventResult.REFUND_ALREADY_REQUESTED;
         }
-        if (payment.status() != PaymentStatus.SUCCEEDED) {
-            throw new UnexpectedOrderEventException(
-                    command.orderId(),
-                    "Refund " + request.refundRequestId() + " requested for payment " + payment.id() + ", which is "
-                            + payment.status() + " and cannot be refunded");
-        }
         if (!payment.amount().equals(request.amount())) {
             throw new UnexpectedOrderEventException(
                     command.orderId(),
                     "Refund " + request.refundRequestId() + " asks for " + request.amount() + " but payment "
                             + payment.id() + " is for " + payment.amount() + "; only full refunds exist");
         }
-        UUID refundId = ids.newId();
-        refunds.save(Refund.request(
-                refundId,
+        Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+        Refund refund = Refund.request(
+                ids.newId(),
                 payment.id(),
                 request.refundRequestId(),
                 request.amount(),
                 request.reason(),
-                clock.instant().truncatedTo(ChronoUnit.MICROS),
+                now,
                 command.correlationId(),
-                command.eventId()));
+                command.eventId());
+        if (payment.status() != PaymentStatus.SUCCEEDED) {
+            // Nothing to give back (never paid, or already refunded): the request fails, visibly, without Stripe.
+            String reason = payment.status() == PaymentStatus.REFUNDED ? "already_refunded" : "payment_not_succeeded";
+            log.warn(
+                    "Refund request {} for payment {} in status {} fails: {}",
+                    request.refundRequestId(),
+                    payment.id(),
+                    payment.status(),
+                    reason);
+            refund.markFailed(reason, now);
+            refunds.save(refund);
+            payment.recordRefundFailure(request.refundRequestId(), reason, now);
+            payments.save(payment);
+            events.publish(payment.pullDomainEvents(), command.correlationId(), command.eventId());
+            return OrderEventResult.REFUND_FAILED;
+        }
+        refunds.save(refund);
         return OrderEventResult.REFUND_REQUESTED;
     }
 }

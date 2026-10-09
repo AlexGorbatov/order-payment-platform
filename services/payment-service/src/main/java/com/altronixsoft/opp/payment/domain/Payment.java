@@ -439,9 +439,9 @@ public final class Payment {
     }
 
     /**
-     * Asks the payment to cancel. Before a PaymentIntent exists it is cancelled on the spot; afterwards the cancellation
-     * worker is scheduled, and the payment becomes {@code CANCELED} when Stripe reports it. Too late (processing,
-     * succeeded, ...) it does nothing.
+     * Asks the payment to cancel. Before a PaymentIntent exists it is cancelled on the spot and {@code Canceled} is
+     * registered; afterwards the cancellation worker is scheduled, and the payment becomes {@code CANCELED} when Stripe
+     * reports it. Too late (processing, succeeded, ...) it does nothing.
      */
     public CancelRequest requestCancel(Instant now) {
         Objects.requireNonNull(now, "now");
@@ -450,6 +450,7 @@ public final class Payment {
         }
         if (status == PaymentStatus.CREATED) {
             moveTo(PaymentStatus.CANCELED, PaymentStatusSource.LOCAL, null, now);
+            domainEvents.add(new PaymentDomainEvent.Canceled(id, orderId, "canceled_before_payment_intent", now));
             return CancelRequest.CANCELED_LOCALLY;
         }
         if (!status.isCancelableAtStripe()) {
@@ -463,6 +464,22 @@ public final class Payment {
         nextAttemptAt = now;
         updatedAt = now;
         return CancelRequest.CANCEL_SCHEDULED;
+    }
+
+    /**
+     * The cancellation will not be sent: Stripe refused it because the PaymentIntent is already {@code processing} or
+     * {@code succeeded} (F19), or the attempts are used up. The work is dropped; the payment stays as it is and Stripe's
+     * final report decides (a late success is refunded by order-service, F18).
+     *
+     * @throws IllegalStateException no cancellation was requested
+     */
+    public void giveUpCancel(Instant now) {
+        Objects.requireNonNull(now, "now");
+        if (!cancelRequested) {
+            throw new IllegalStateException("Payment " + id + " has no cancellation to give up");
+        }
+        clearWork();
+        updatedAt = now;
     }
 
     /** The cancellation request reached Stripe; the cancellation work is done. */

@@ -109,8 +109,8 @@ class StripeMockContractIT {
 
     @Test
     void refundMapsARefund() {
-        GatewayRefund refund = gateway.createRefund(
-                new CreateRefundRequest(UUID.randomUUID(), UUID.randomUUID(), "pi_123", Money.of(3097, "EUR")));
+        GatewayRefund refund = gateway.createRefund(new CreateRefundRequest(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "pi_123", Money.of(3097, "EUR")));
 
         assertThat(refund.id()).startsWith("re_");
         assertThat(refund.status()).isIn("pending", "succeeded", "failed", "requires_action", "canceled");

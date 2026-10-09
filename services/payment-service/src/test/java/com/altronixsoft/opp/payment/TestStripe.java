@@ -120,6 +120,33 @@ final class TestStripe {
                  "message":"Your card was declined."}}"""));
     }
 
+    /** {@code POST /v1/payment_intents/{id}/cancel} answers 200 with the PaymentIntent {@code canceled}. */
+    static void stubCancel(String paymentIntentId) {
+        SERVER.stubFor(json(
+                post(urlPathEqualTo("/v1/payment_intents/" + paymentIntentId + "/cancel")),
+                200,
+                paymentIntent(paymentIntentId, "canceled", 3097, "EUR")));
+    }
+
+    /** The cancellation comes too late: the PaymentIntent already succeeded (F19). */
+    static void stubCancelUnexpectedState(String paymentIntentId) {
+        SERVER.stubFor(json(
+                post(urlPathEqualTo("/v1/payment_intents/" + paymentIntentId + "/cancel")),
+                400,
+                error(
+                        "invalid_request_error",
+                        "payment_intent_unexpected_state",
+                        "You cannot cancel this PaymentIntent because it has a status of succeeded.")));
+    }
+
+    /** {@code POST /v1/refunds} answers 200 with a refund {@code refundId} in {@code status}. */
+    static void stubRefund(String refundId, String paymentIntentId, String status) {
+        SERVER.stubFor(
+                json(post(urlPathEqualTo("/v1/refunds")), 200, """
+                {"id":"%s","object":"refund","amount":3097,"currency":"eur","status":"%s","payment_intent":"%s",
+                 "failure_reason":null,"created":1790000000,"metadata":{}}""".formatted(refundId, status, paymentIntentId)));
+    }
+
     // ---- what the service sent ----
 
     record StubbedReply(int status, String body) {
@@ -141,6 +168,20 @@ final class TestStripe {
         return requests().stream()
                 .filter(r -> r.getMethod().getName().equals("POST"))
                 .filter(r -> r.getUrl().equals("/v1/payment_intents"))
+                .toList();
+    }
+
+    static List<LoggedRequest> cancels() {
+        return requests().stream()
+                .filter(r -> r.getMethod().getName().equals("POST"))
+                .filter(r -> r.getUrl().endsWith("/cancel"))
+                .toList();
+    }
+
+    static List<LoggedRequest> refunds() {
+        return requests().stream()
+                .filter(r -> r.getMethod().getName().equals("POST"))
+                .filter(r -> r.getUrl().equals("/v1/refunds"))
                 .toList();
     }
 

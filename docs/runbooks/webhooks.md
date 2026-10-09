@@ -11,12 +11,12 @@ is retried with backoff (`FAILED`) and, after `payment.webhook-processor.retry-m
 | Signals | (metrics; v1.0.0 ships no alert rules, architecture §13) `webhook.dead` increases (page) · `webhook.livemode.rejected` > 0 (page) · `webhook.signature.failures` rate > 0 for 10 min · `webhook.processing.lag` p95 > 1 min · Stripe Dashboard reports failed deliveries |
 | Who | an operator with database access to `payments_db` and access to the Stripe Dashboard (test mode) |
 | Statuses | `RECEIVED` → `PROCESSED` \| `IGNORED`; on error `FAILED` → … → `DEAD` |
-| Logs | every line of one event carries `stripeEventId`, and `paymentId` / `orderId` / `correlationId` once the payment is known; payloads and signatures are never logged |
+| Logs | the processor populates MDC with `stripeEventId`, then `paymentId` / `orderId` / `correlationId` when known; the default console format does not print MDC fields; payloads and signatures are never logged |
 
 Locally, open `payments_db` with:
 
 ```bash
-docker compose -f infra/docker-compose.yml exec postgres psql -U payments -d payments_db
+docker compose -f infra/docker-compose.yml exec postgres psql -U postgres -d payments_db
 ```
 
 ## 1. Find
@@ -65,7 +65,7 @@ Not an error, and not here: a report older than what is applied ends `PROCESSED`
 
 ## 3. Replay a DEAD event
 
-Fix the cause first. Then put the event back into the queue; the processor picks it up within a second and applies it
+Fix the cause first. Then put the event back into the queue; the processor normally picks it up on its next one-second poll (scheduler contention can delay this) and applies it
 under the normal ordering rule, so replaying an event that has meanwhile become stale is harmless.
 
 ```sql
@@ -94,15 +94,15 @@ An event that must not be applied (for example a refund that failed *after* it h
 
 Symptoms: Stripe shows failed deliveries, or payments stay in a non-terminal status. In the Stripe Dashboard (test mode)
 open **Workbench → Webhooks → <endpoint> → Event deliveries**: every event with its delivery status, HTTP code and the
-next automatic retry. In test mode Stripe retries a failed delivery three times over a few hours (live mode: up to
-three days).
+next automatic retry. Stripe documents three retries over a few hours for sandbox deliveries. Verify the next retry in the event delivery view.
+[Delivery behavior](https://docs.stripe.com/webhooks#automatic-retries).
 
 - **400** — signature or live-mode refusal; see §5 and §7. Fix, then resend.
 - **413** — a body over 256 KB; not expected for the handled types, investigate before raising the limit.
 - **5xx / timeout / connection refused** — payment-service was down or unreachable.
 
 Resend an event that never arrived (it is not in `stripe_webhook_event`) from the event's page, **Resend** (up to 15
-days), or with the Stripe CLI (up to 30 days):
+days), or with the Stripe CLI (up to 30 days), per [Stripe's manual retry documentation](https://docs.stripe.com/webhooks#manual-retries):
 
 ```bash
 stripe events resend evt_... --webhook-endpoint=we_...
@@ -111,8 +111,7 @@ stripe events resend evt_... --webhook-endpoint=we_...
 The reconciliation job (architecture §8.4) also catches lost webhooks: every 5 minutes it asks Stripe about payments
 that have not moved for 10 minutes and applies what Stripe says (F11; `reconciliation.drift{from,to}` counts every
 correction). To run it at once: `POST /admin/reconciliation/run` with an `ops` token; `GET /admin/reconciliation/last`
-shows what the latest run found. Resending is still useful for events that change more than a status (disputes, refund
-outcomes).
+shows what the latest run found. It checks only `REQUIRES_PAYMENT_METHOD`, `REQUIRES_ACTION` and `PROCESSING` PaymentIntents; it does not retrieve refunds or disputes. Missing refund/dispute events require redelivery. A manual run uses the same staleness filter; it does not force a fresh payment to be checked.
 
 Locally with the `stripe-test` profile the Stripe CLI forwards events; its terminal (`docker compose ... logs -f
 stripe-cli`) shows every delivery and the status payment-service answered.
@@ -131,6 +130,8 @@ A refused request stores nothing (F12); once fixed, resend the affected events (
 ## 6. Rotate the signing secret
 
 The endpoint accepts every secret listed in `STRIPE_WEBHOOK_SECRET` (comma-separated), so a rotation has no gap:
+
+For the provider-side rotation procedure see [Stripe's signing-secret documentation](https://docs.stripe.com/webhooks#roll-endpoint-signing-secrets-periodically).
 
 1. Stripe Dashboard → **Workbench → Webhooks → <endpoint> → ⋯ → Roll secret**. Choose an expiry for the old secret
    (up to 24 hours) long enough for a deployment. Until it expires Stripe signs every delivery with **both** secrets.
@@ -161,4 +162,16 @@ With the `local` profile (stripe-mock creates PaymentIntents but sends no webhoo
 ./scripts/send-test-webhook.sh payment_intent.payment_failed "$ORDER"
 ```
 
-The script signs with the first secret of `STRIPE_WEBHOOK_SECRET` from `.env`, the same one payment-service reads.
+Here `$ORDER` is an **order UUID**, not the `ORDER` service URL used in the dead-letter runbook. The script signs with the first secret of `STRIPE_WEBHOOK_SECRET` from the environment or `.env`. Without `.env`, supply `STRIPE_WEBHOOK_SECRET=whsec_local_demo` for the local Compose default.
+
+## 9. Housekeeping
+
+No automatic webhook cleanup job ships in v1.0.0. The 30-day retention is an operator policy; keep open and `DEAD` events for recovery. After checking incident needs, purge only completed rows:
+
+```sql
+DELETE FROM stripe_webhook_event
+WHERE status IN ('PROCESSED', 'IGNORED')
+  AND processed_at < now() - interval '30 days';
+```
+
+Purging removes event-id deduplication for those rows. Repeated old events then rely on aggregate transition checks; a discarded failed-attempt event can be recorded again if its watermark is still current. Choose the retention window to cover the intended resend horizon.

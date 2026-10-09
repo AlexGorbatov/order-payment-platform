@@ -2,14 +2,14 @@
 
 Local infrastructure for development and the manual demo (architecture §8.1, §12, §16).
 Everything lives in [`infra/docker-compose.yml`](../infra/docker-compose.yml). The services run on the host
-(`./mvnw spring-boot:run`) or as containers (`./scripts/up.sh --apps`, images built from
+(`java -jar` after building the reactor) or as containers (`./scripts/up.sh --apps`, images built from
 [`infra/Dockerfile`](../infra/Dockerfile)); for a guided tour see [demo.md](demo.md).
 
 ## Prerequisites
 
 - Docker Engine 24+ with Compose v2 (`docker compose version`)
-- `bash`, `curl`, `jq`
-- JDK 21 for the services (see [README](../README.md))
+- `bash`, `curl`, `jq`, `openssl`
+- JDK 21 when running services on the host or tests; the `apps` image build supplies its own JDK
 
 ## Start and stop
 
@@ -92,6 +92,21 @@ without a volume, so the file is the single source of truth — edit it and rest
 Both clients add `order-service` and `payment-service` to `aud`. The issuer is always
 `http://localhost:8180/realms/opp` (`KC_HOSTNAME`), including for tokens requested from inside the compose network;
 JWKS: `http://localhost:8180/realms/opp/protocol/openid-connect/certs`.
+
+## Running services on the host
+
+Compose does not export `.env` variables into your shell. After `./scripts/up.sh`, build the service jars and start each in a separate terminal:
+
+```bash
+./mvnw -DskipTests -DskipITs -Djacoco.skip=true package
+SPRING_PROFILES_ACTIVE=local java -jar services/order-service/target/order-service-0.1.0-SNAPSHOT.jar
+STRIPE_API_KEY=sk_test_localdemo STRIPE_API_BASE=http://localhost:12111 STRIPE_WEBHOOK_SECRET=whsec_local_demo \
+  SPRING_PROFILES_ACTIVE=local java -jar services/payment-service/target/payment-service-0.1.0-SNAPSHOT.jar
+```
+
+Use the same signing secret for the webhook script (`STRIPE_WEBHOOK_SECRET=whsec_local_demo ./scripts/send-test-webhook.sh ...`).
+With real Stripe, export the test key, signing secret and API base from your local environment before starting payment-service.
+Maven coordinates remain `0.1.0-SNAPSHOT`; v1.0.0 identifies the documented platform milestone, not a Maven artifact release or Git tag.
 
 ## Getting a token
 

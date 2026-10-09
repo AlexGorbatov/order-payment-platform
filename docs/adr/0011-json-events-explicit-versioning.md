@@ -1,6 +1,7 @@
 # ADR-0011: JSON events with explicit versioning (vs. Avro + Schema Registry)
 
 - Status: Accepted
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
 - Date: 2026-10-08
 - Related: architecture §9.2, §9.3, §17
 

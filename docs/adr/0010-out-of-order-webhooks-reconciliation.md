@@ -1,6 +1,7 @@
 # ADR-0010: Out-of-order webhook handling and reconciliation
 
 - Status: Accepted
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
 - Date: 2026-10-08
 - Related: architecture §5.2, §8.3, §8.4, §15 (F10, F11, F21)
 
@@ -34,8 +35,7 @@ machine, yielding one transition and one event (F21).
 
 ## Consequences
 
-- Payment state is monotonic (F10) and eventually consistent with Stripe within ~15 minutes even if webhooks are
-  lost (F11).
+- Allowed-transition and timestamp checks prevent stale reports from reversing terminal outcomes (F10). Quiet, unfinished PaymentIntents are normally checked after ~10–15 minutes plus run time (F11), subject to provider availability, batch size and rate limits. Refunds and disputes are not reconciled.
 - Reconciliation adds periodic Stripe traffic, bounded by the staleness filter and rate limit.
 - Stale events are visible via `webhook.stale.ignored`, which helps distinguish reordering from bugs.
 
@@ -68,6 +68,6 @@ its watermark and cannot shadow a slightly older webhook. Candidates are locked 
 in `payment.last_reconciled_at` (bookkeeping, not mapped into the aggregate, no version bump), which keeps a checked
 payment from being checked again — by this or another instance — for the stale period; a payment that could not be
 checked (Stripe unavailable) is released for the next run. Calls go through a rate limiter
-(`payment.reconciliation.rate-limit-per-second`, default 5, well below Stripe's test-mode read limit); a run that gets
+(`payment.reconciliation.rate-limit-per-second`, default 5; configure the budget for the account); a run that gets
 no permit in time leaves the rest for the next one. F21 is the optimistic lock: if a webhook changed the payment while
 Stripe was being asked, the reconciliation reloads, finds the status already applied, and writes nothing.

@@ -1,6 +1,7 @@
 # ADR-0005: Inbox-based idempotent consumers
 
 - Status: Accepted
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
 - Date: 2026-10-08 (implementation details added with the inbox implementation)
 - Related: architecture §7.2, §10, §15 (F02, F03), ADR-0004, ADR-0007
 
@@ -15,7 +16,7 @@ paid, request a refund) must still happen exactly once.
 - Every consumer inserts `(consumer_group, event_id)` into `inbox_message` with `ON CONFLICT DO NOTHING` in the
   **same** transaction as the business change.
 - Zero rows inserted means the event was already processed: the handler is skipped and `inbox.duplicates` is counted.
-- Inbox retention (14 days) is longer than topic retention (7 days), so any redelivery is still detected.
+- Inbox retention is 14 days after processing; source-topic retention is 7 days. Deduplication is bounded by that window; retry/DLT topics retain records for 14 days, and database dead letters can be replayed later.
 - The mechanism ships in `platform-messaging-starter` so both services behave identically (ADR-0014).
 
 ## Alternatives considered
@@ -68,7 +69,5 @@ bug) is not detected here — state machines (ADR-0006) remain the second line o
 ### Retention
 
 `InboxCleanup` deletes rows older than `platform.inbox.cleanup.retention` (default 14 days) in batches of 1000, each in
-its own transaction. The retention must exceed the topic retention (7 days) so that any record still readable from a
-topic is still recognised; the property is validated to be at least one day, and operators must keep it above the topic
-retention if they change either.
+its own transaction. The retention must cover the intended retry/replay horizon, including time already spent on source and retry topics. The property is validated to be at least one day; operators must choose a retention window appropriate to their replay policy. Replays after cleanup rely on business constraints and state checks rather than the inbox alone.
 

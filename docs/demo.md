@@ -28,8 +28,8 @@ In this mode `stripe-mock` answers the API calls but is stateless and sends no w
 and sends the signed webhooks itself ([`send-test-webhook.sh`](../scripts/send-test-webhook.sh), the same pipeline a real
 webhook takes: signature check, storage, asynchronous processing). Everything on the platform side is the real thing.
 
-The services also run on the host if you prefer (`./mvnw -pl services/order-service spring-boot:run` with
-`SPRING_PROFILES_ACTIVE=local`, see [local-setup.md](local-setup.md)); `demo.sh` finds them on ports 8081 and 8082.
+The services also run on the host if you prefer (build the reactor and start the jars as shown in
+[local-setup.md](local-setup.md#running-services-on-the-host)); `demo.sh` finds them on ports 8081 and 8082.
 
 ## Real Stripe in test mode
 
@@ -119,7 +119,7 @@ Status history of the order (order-service, UTC)
 
 The platform is tuned for the demo in the `apps` profile ([`docker-compose.yml`](../infra/docker-compose.yml), "demo
 tuning"): an unpaid order is cancelled after **1 minute** (default 30) and the cancellation worker looks every 15 seconds
-(default 2). Nothing else differs from production settings.
+(default 2). The containers also enable the local test-support endpoint and order-service OpenAPI; this Compose environment uses development credentials and a single Kafka broker.
 
 ## What each scenario demonstrates
 
@@ -128,7 +128,7 @@ tuning"): an unpaid order is cancelled after **1 minute** (default 30) and the c
 | `success` | The customer orders and pays. | The whole saga across two services that never call each other: outbox → Kafka → consumer → worker creating the PaymentIntent with an idempotency key (`pi-create:{paymentId}`) → Stripe → signed webhook → stored first, processed asynchronously → `PaymentSucceeded` → order `PAID`. ([§6.1](architecture.md#61-happy-path)) | `OrderCreated`, `PaymentInitiated`, `PaymentSucceeded` |
 | `decline-then-success` | The first card is declined, a second one works. | A failed attempt is not a failed order: the order stays `PENDING_PAYMENT`, the failure is recorded (`last_error_code`) and announced, and the customer retries on the **same** PaymentIntent. ([§6.2](architecture.md#62-failed-attempt-and-retry)) | `OrderCreated`, `PaymentInitiated`, `PaymentAttemptFailed`, `PaymentSucceeded` |
 | `3ds` | The card asks for 3-D Secure. | `REQUIRES_ACTION` is a waiting state, not an outcome: the order does not change until the authentication ends. ([§6.3](architecture.md#63-strong-customer-authentication-3ds)) With the real Stripe the challenge needs a browser, so the script pays with another card instead; the [checkout page](#the-checkout-page) does the real challenge. | `OrderCreated`, `PaymentInitiated`, `PaymentActionRequired`, `PaymentSucceeded` |
-| `timeout-late-payment` | Nobody pays in time; the order is cancelled; then the money arrives anyway. | The hardest race of the saga ([§6.4](architecture.md#64-cancellation-and-the-late-success-race), F18): the customer is never charged for a cancelled order. The payment-timeout job cancels the order, `OrderCancelled` goes to payment-service, but the payment succeeds before the PaymentIntent is cancelled; order-service sees `PaymentSucceeded` on a cancelled order and requests a refund (`LATE_PAYMENT_AFTER_CANCEL`) on its own. | `OrderCreated`, `PaymentInitiated`, `OrderCancelled` (`TIMEOUT`), `PaymentSucceeded`, `OrderRefundRequested`, `PaymentRefunded` |
+| `timeout-late-payment` | Nobody pays in time; the order is cancelled; then the money arrives anyway. | The hardest race of the saga ([§6.4](architecture.md#64-cancellation-and-the-late-success-race), F18): a payment on a cancelled order triggers an asynchronous refund request; a failure remains visible as `REFUND_FAILED`. The payment-timeout job cancels the order, `OrderCancelled` goes to payment-service, but the payment succeeds before the PaymentIntent is cancelled; order-service sees `PaymentSucceeded` on a cancelled order and requests a refund (`LATE_PAYMENT_AFTER_CANCEL`) on its own. | `OrderCreated`, `PaymentInitiated`, `OrderCancelled` (`TIMEOUT`), `PaymentSucceeded`, `OrderRefundRequested`, `PaymentRefunded` |
 | `refund` | An admin refunds a paid order. | Role-based access (`admin1`), `202 Accepted` for work that finishes later, the refund worker creating the Stripe refund (`refund:{refundId}`), and the final state coming from the webhook, not from the API call. One refund per request id: repeating the call with the same `Idempotency-Key` changes nothing. ([§6.5](architecture.md#65-refund)) | `…PaymentSucceeded`, `OrderRefundRequested` (`ADMIN`), `PaymentRefunded` |
 | `dispute` | The cardholder disputes the charge. | A notification-only flow: the order **stays `PAID`** and is flagged `disputed`; a `PaymentDisputed` event is published once, however often the webhook is delivered. | `…PaymentSucceeded`, `PaymentDisputed` |
 
@@ -198,8 +198,7 @@ customer1`). Reconciliation and dead letters are operator endpoints (role `ops`,
 ([runbooks](runbooks/dlq.md)).
 
 **Jaeger and Grafana.** `./scripts/up.sh --apps --observability` also starts the OpenTelemetry collector, Jaeger
-(<http://localhost:16686>), Prometheus and Grafana (<http://localhost:3000>, `admin`/`admin`). The services export traces
-and metrics only once tracing export and a dashboard exist; v1.0.0 does not ship them (architecture §13), so these UIs
+(<http://localhost:16686>), Prometheus and Grafana (<http://localhost:3000>, `admin`/`admin`). The services expose metrics through Actuator, but Prometheus scraping and trace export still require configuration; v1.0.0 does not ship them (architecture §13), so these UIs
 start but stay empty.
 
 ## Troubleshooting

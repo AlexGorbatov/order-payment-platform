@@ -6,7 +6,7 @@ versions follow [Semantic Versioning](https://semver.org/). The event contracts 
 
 ## [1.0.0] - 2026-10-09
 
-First complete version: the platform, its tests, a demo and its documentation.
+First documented platform milestone: the services, reliability starters, automated tests and manual demo. Maven coordinates remain `0.1.0-SNAPSHOT`; this entry does not create a release artifact or a Git tag.
 
 ### Added
 
@@ -52,10 +52,16 @@ services as processes against PostgreSQL, Kafka, Keycloak and a stateful Stripe 
 (Keycloak login with PKCE, Stripe Payment Element), signed test webhooks, token scripts ([docs/demo.md](docs/demo.md)).
 
 **CI**: build and verify with coverage reports, the end-to-end suite as a separate job that reuses the built jars, a check
-that the compose files are valid and the images build, and the coverage badge.
+that the compose files are valid and the images build, and publication of overall coverage to the `badges` branch. The README currently displays the enforced coverage gate because the published endpoint is not yet available.
 
 **Documentation**: architecture with a 22-entry failure-mode matrix mapped to tests, fourteen ADRs with an index, the event
 catalog, runbooks for dead letters and webhooks, the testing guide, the demo guide, a backlog.
+
+### Documentation corrections
+
+- Bound reliability claims to the mechanisms actually implemented: HTTP response-recording crash window, finite inbox retention, bounded worker retries and asynchronous compensation.
+- Correct `OrderCancelled` reordering behavior, local `PaymentCanceled` semantics, manual webhook retention and the reconciliation scope.
+- Review all fourteen ADRs as Accepted; link implementation and test evidence. Update recovery procedures, host startup instructions and GitHub Markdown checks.
 
 ### Known limitations
 
@@ -65,4 +71,7 @@ catalog, runbooks for dead letters and webhooks, the testing guide, the demo gui
 - The dead-letter persister defaults to every `*-dlt` topic; each service sets its own pattern
   ([ADR-0007](docs/adr/0007-retry-topics-dlt-ordering-tradeoff.md), [backlog](docs/backlog.md)).
 - Error `type` URNs use two prefixes (`urn:problem-type:` and `urn:opp:problem:`).
+- HTTP business commits and cached responses are separate transactions; a crash can allow duplicate order creation on retry.
+- Webhook cleanup is manual; reconciliation covers unfinished PaymentIntents, not refund outcomes or disputes.
+- Refund and cancellation retries have no age cutoff for provider key retention; unresolved old mutations require checking Stripe before recovery.
 - Retry topics do not keep per-key order; the consumers are written to tolerate it ([ADR-0007](docs/adr/0007-retry-topics-dlt-ordering-tradeoff.md)).

@@ -1,6 +1,7 @@
 # ADR-0014: Shared platform starters (vs. per-service copies)
 
 - Status: Accepted
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
 - Date: 2026-10-08
 - Related: architecture §4, §7.1–§7.4, §10
 

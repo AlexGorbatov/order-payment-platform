@@ -42,3 +42,21 @@ Ideas and follow-ups that are out of scope for the current task. Each entry: wha
   One prefix would make the API uniform.
 - **Why not now:** changing a published `type` is a (small) API change; no client depends on it yet.
 - **Related:** architecture §11, ADR-0006.
+
+## HTTP idempotency: business commit and response recording
+
+- **What:** make order placement and the successful HTTP idempotency result atomic. Today the order commits before the interceptor records the response; after a crash and claim abandonment, a retry can allocate a new order id.
+- **Why not now:** requires a persistence contract between the generic starter and use cases, or a durable business request key; this task documents existing behavior.
+- **Related:** architecture §7.3; ADR-0006. Add a process-crash test covering the interval between these commits.
+
+## Automatic webhook retention
+
+- **What:** implement a bounded cleanup job for completed webhook rows, preserving open and `DEAD` events. The 30-day retention currently requires operator SQL.
+- **Why not now:** needs a defined replay/deduplication horizon and cleanup coverage.
+- **Related:** architecture §10; ADR-0009; webhook runbook §9.
+
+## Refund recovery and provider idempotency retention
+
+- **What:** reconcile pending refund outcomes and define safe recovery for unresolved external mutations older than provider idempotency retention. Only initiation currently has a 23-hour retry cutoff; refund and cancellation workers have none.
+- **Why not now:** needs provider lookup and an explicit recovery policy before retrying an ambiguous old operation.
+- **Related:** architecture §8.4, §17; ADR-0008, ADR-0010.

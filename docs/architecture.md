@@ -4,7 +4,7 @@ Status: v1.0.0, describes the implemented system. Owner: Alex Gorbatov / Altroni
 
 ## 1. Purpose & Scope
 
-Reference implementation of a reliable order → payment integration with Stripe (test mode), built to demonstrate production-grade integration engineering: event-driven sagas, effectively-once business effects over at-least-once delivery, secure webhook ingestion, and full testability without a Stripe account.
+Reference implementation of a reliable order → payment integration with Stripe (test mode), built to demonstrate integration engineering: event-driven sagas, effectively-once business effects over at-least-once delivery, secure webhook ingestion, and full testability without a Stripe account.
 
 **In scope**
 - Two services: `order-service`, `payment-service`, communicating only via Kafka.
@@ -13,7 +13,7 @@ Reference implementation of a reliable order → payment integration with Stripe
 - Transactional outbox, inbox (idempotent consumers), HTTP idempotency, retry topics, DLT with persistence and replay.
 - Reconciliation with Stripe as a safety net for lost webhooks.
 - Keycloak (OIDC/JWT) with RBAC and ownership checks.
-- Testcontainers-based integration, E2E, and chaos tests; observability (traces, metrics, logs).
+- Testcontainers-based integration, E2E and chaos tests; Micrometer metrics and correlation context (§13).
 
 **Out of scope (v1)**
 Partial refunds, multi-currency/FX, inventory, shipping, real frontend (optional demo page only), Avro/Schema Registry, Debezium CDC, Kubernetes manifests, multi-region, Stripe Connect, subscriptions.
@@ -22,12 +22,12 @@ Partial refunds, multi-currency/FX, inventory, shipping, real frontend (optional
 
 | Priority | Goal | Concretely |
 |---|---|---|
-| 1 | No double charge, no lost payment | ≤ 1 successful PaymentIntent per order; every Stripe state change eventually reflected locally |
+| 1 | No double charge, no lost payment | One local payment per order; stable Stripe keys within the initiation window; compensation failures visible |
 | 2 | No lost events | Outbox + at-least-once delivery + reconciliation |
-| 3 | Effectively-once effects | Inbox, idempotency keys at every boundary, monotonic state machines |
+| 3 | Effectively-once effects | Inbox, provider keys, aggregate constraints and allowed-transition checks; HTTP crash window in §7.3 |
 | 4 | Security | Signed webhooks, JWT + RBAC + ownership, test-mode guard, no secrets/PAN in system |
 | 5 | Testability | Every failure mode in §15 covered by an automated test without real Stripe |
-| 6 | Operability | Metrics, traces across async boundaries, DLT replay, runbooks |
+| 6 | Operability | Protected metrics API, event correlation, DLT replay and runbooks; tracing export deferred |
 
 ## 3. System Context
 
@@ -101,7 +101,7 @@ stateDiagram-v2
 - Prices come only from the server-side catalog; the client sends `sku` + `quantity`. 1–20 lines, quantity 1–10, single currency (EUR in seed data).
 - Every transition writes `order_status_history` (source: API | EVENT | JOB, source event id).
 
-**Implementation notes (order-service domain).** The aggregate `Order` is plain Java; each command (`place`, `markPaid`, `cancel(reason)`, `requestRefund(reason, refundRequestId)`, `markRefunded`, `markRefundFailed`, `markDisputed`) checks first and changes afterwards, so a rejected command (`IllegalOrderTransitionException`) leaves status, history and events untouched. An accepted one moves the status, appends a history entry and registers one domain event, which the application layer hands to the outbox in the saving transaction . Details the diagram leaves implicit:
+**Implementation notes (order-service domain).** The aggregate `Order` is plain Java; each command (`place`, `markPaid`, `cancel(reason)`, `requestRefund(reason, refundRequestId)`, `markRefunded`, `markRefundFailed`, `markDisputed`) checks first and changes afterwards, so a rejected command (`IllegalOrderTransitionException`) leaves status, history and events untouched. An accepted one moves the status, appends a history entry and registers one domain event, which the application layer hands to the outbox in the saving transaction. Details the diagram leaves implicit:
 - `requestRefund` couples the reason to the status it comes from: `LATE_PAYMENT_AFTER_CANCEL` only from `CANCELLED` (automatic compensation), `ADMIN` from `PAID` and from `REFUND_FAILED` (retry), never `ADMIN` from `CANCELLED`. Refunds are always for the full order total (§5.3).
 - A dispute sets the flag in any status and writes a history entry with `from_status = to_status` and reason `DISPUTED`; repeating it changes nothing.
 - A SKU may appear on one line only (the limits are checked on the lines after price lookup); quantity 1–10 and 1–20 lines are enforced by the domain, prices and names are copied from the catalog into `order_item` at ordering time.
@@ -248,6 +248,8 @@ flowchart LR
   F -- max attempts --> DEAD[DEAD + alert]
 ```
 
+The diagram's `alert` label denotes an operator signal (ERROR log and `webhook.dead` metric). Automated alert rules are not shipped (§13).
+
 ### 6.7 Order-side handling of payment events
 
 order-service consumes `payment.events.v1` as group `order-service`; every event runs once per `eventId` inside the inbox transaction (§7.2). Events arrive at least once and, through the retry topics, not always in order (§7.4), so each rule checks the order's status first. Anything a duplicate or a race explains is a no-op (`IGNORED`, logged and counted); anything else is a `NonRetryableEventException` and goes straight to the DLT (F15).
@@ -272,20 +274,24 @@ order-service consumes `payment.events.v1` as group `order-service`; every event
 Business change and `outbox_event` row are written in one DB transaction (`OutboxPublisher` requires an active transaction). `OutboxRelay` polls with `FOR UPDATE SKIP LOCKED`, sends to Kafka (`acks=all`, `enable.idempotence=true`), waits for acknowledgement, marks `published_at`. On failure the batch stops (preserves per-key order); attempts and last error are recorded. Crash after send and before commit ⇒ duplicate publish ⇒ handled by inbox. Published rows are deleted after 7 days. Alternative (Debezium CDC) rejected for scope — ADR-0004.
 
 ### 7.2 Inbox (idempotent consumer)
-`INSERT INTO inbox_message(consumer_group, event_id) ON CONFLICT DO NOTHING` in the **same** transaction as the business change. Zero rows inserted ⇒ duplicate ⇒ skip. Inbox retention (14 days) exceeds topic retention (7 days), so any redelivery is still detected.
+`INSERT INTO inbox_message(consumer_group, event_id) ON CONFLICT DO NOTHING` in the **same** transaction as the business change. Zero rows inserted ⇒ duplicate ⇒ skip. Inbox rows are retained for 14 days after processing; source topics retain records for 7 days. Retry/DLT topics also
+retain records for 14 days, and stored dead letters can be replayed later. Inbox deduplication is therefore bounded by
+retention; aggregate constraints remain necessary for older replays ([ADR-0005](adr/0005-inbox-idempotent-consumers.md)).
 
 ### 7.3 Idempotency layers
 
 | Boundary | Mechanism | Key | Storage | Window |
 |---|---|---|---|---|
 | Client → API | `Idempotency-Key` header + request hash | (principal, key) | `idempotency_record` | 24 h |
-| Service → Stripe | Stripe `Idempotency-Key` | `pi-create:{paymentId}`, `pi-cancel:{paymentId}`, `refund:{refundId}` | Stripe | 24 h (Stripe-defined) |
-| Stripe → webhook | Event id dedupe | `evt_...` | `stripe_webhook_event` PK | 30 days |
+| Service → Stripe | Stripe `Idempotency-Key` | `pi-create:{paymentId}`, `pi-cancel:{paymentId}`, `refund:{refundId}` | Stripe | at least 24 h (provider retention) |
+| Stripe → webhook | Event id dedupe | `evt_...` | `stripe_webhook_event` PK | until manual purge (30-day target) |
 | Kafka → consumer | Inbox | (group, eventId) | `inbox_message` | 14 days |
 | Relay → Kafka | Idempotent producer | producer id/sequence | Kafka | producer session |
 | Business | State machine + `@Version` | aggregate version | aggregate tables | — |
 
-HTTP semantics: same key + same hash ⇒ replay stored response (`Idempotent-Replayed: true`); same key + different hash ⇒ 422; in progress ⇒ 409 + `Retry-After`; 5xx ⇒ record removed so the client may retry.
+HTTP semantics: a completed record with the same key and request hash replays the stored response (`Idempotent-Replayed: true`); a completed record with a different hash returns 422; an in-progress record returns 409 + `Retry-After`. Responses with 5xx, 409 or 429 release the claim so the client may retry; other 4xx responses are stored.
+
+**HTTP crash window.** The business transaction commits before `IdempotencyInterceptor.afterCompletion` stores the response in a separate transaction. A crash between those commits leaves an `IN_PROGRESS` record; after the two-minute abandonment timeout the next request can execute again. `PlaceOrderService` generates a fresh order id and has no unique constraint tied to the HTTP key, so that retry can create a second order. The concurrent-request test F16 does not prove crash-safe order creation. Closing this window is follow-up work ([ADR-0006](adr/0006-multi-layer-idempotency.md), [backlog](backlog.md#http-idempotency-business-commit-and-response-recording)).
 
 ### 7.4 Retries and dead letters
 Consumers: `ErrorHandlingDeserializer`; short blocking retry (2 × 200 ms) then non-blocking retry topics (1 s, 10 s, 60 s) then `<topic>-dlt`. Non-retryable (deserialization, validation, `NonRetryableEventException`) go straight to DLT. A DLT listener persists every dead letter to `dead_letter_message`; ops can list, replay (re-published through the outbox to the original topic, header `x-replay-of`), or resolve. Trade-off: retry topics break per-key ordering; accepted because consumers are order-tolerant (inbox + monotonic state machines) — ADR-0007. Each service persists only the dead-letter topic of the topic it consumes (`platform.dead-letters.persister.topic-pattern`: `payment.events.v1-dlt` in order-service, `order.events.v1-dlt` in payment-service); the starter's default `.*-dlt` would store the other service's dead letters too, because both share the broker.
@@ -294,7 +300,7 @@ Consumers: `ErrorHandlingDeserializer`; short blocking retry (2 × 200 ms) then 
 Partition key = `orderId` on both topics ⇒ per-order ordering within a topic. Cross-topic ordering is not guaranteed and not relied upon. Stripe webhook order is not guaranteed — handled in §8.3.
 
 ### 7.6 DB-backed work queues for external calls
-Kafka consumers and webhook ingress only write state. Stripe calls are made by scheduled workers that claim due rows (`status`, `next_attempt_at`) with `FOR UPDATE SKIP LOCKED`, call Stripe **outside** a transaction, then persist the result in a new transaction. Transient errors ⇒ exponential backoff with jitter; permanent ⇒ terminal state + event. Workers: `PaymentInitiationWorker`, `PaymentCancellationWorker`, `RefundWorker`, `WebhookProcessor`, `ReconciliationJob`. Safe with multiple instances — ADR-0008.
+Kafka consumers and webhook ingress only write state. Stripe calls are made by scheduled workers that claim due rows (`status`, `next_attempt_at`) with `FOR UPDATE SKIP LOCKED`, call Stripe **outside** a transaction, then persist the result in a new transaction. Transient errors ⇒ exponential backoff with jitter; permanent ⇒ terminal state + event. The scheduled jobs invoke `InitiatePaymentsService`, `CancelPaymentIntentsService` and `CreateRefundsService`. `ProcessWebhookEventsService` also claims and leases DB work, but performs no Stripe call: each event is applied wholly inside a transaction. `ReconcilePaymentsService` claims using `last_reconciled_at` and performs read-only Stripe calls outside transactions. Claims and optimistic locking coordinate multiple instances — [ADR-0008](adr/0008-db-backed-work-queues.md).
 
 ## 8. Stripe Integration
 
@@ -311,7 +317,7 @@ Kafka consumers and webhook ingress only write state. Stripe calls are made by s
 ### 8.2 Gateway
 Port `PaymentGateway` (create/retrieve/cancel PI, create refund, test-only confirm). Adapter uses `StripeClient` with explicit timeouts, `maxNetworkRetries=2`, Resilience4j circuit breaker (only transient errors count). PaymentIntent: `amount` (minor), `currency`, `automatic_payment_methods.enabled=true` with `allow_redirects=never`, `metadata{orderId, paymentId}`.
 Error classes: TRANSIENT (connection, 5xx, 429, idempotency in-progress), PERMANENT (400 invalid request, card errors), CONFIG (401/403 — alert, no blind retry), IDEMPOTENCY_MISMATCH (bug — alert).
-Idempotency keys expire after 24 h: a payment still in `CREATED` after 23 h is moved to `INITIATION_FAILED` rather than retried with a fresh key (which could create a second PaymentIntent).
+Stripe can prune idempotency keys after at least 24 h: a payment still in `CREATED` after 23 h is moved to `INITIATION_FAILED` rather than retried with a fresh key (which could create a second PaymentIntent).
 `LiveModeGuard` refuses to start with a non-test key.
 
 **Implementation notes (Stripe adapter; details and the reconciliation with current Stripe documentation are in ADR-0012).** The SDK retries timeouts, 409 and ≥ 500 itself (same idempotency key, up to `maxNetworkRetries`), but not 429, which is therefore left to the work queue's backoff; a gateway call can make up to three HTTP requests. Errors are classified by HTTP status and error `type`/`code` (409 and `idempotency_key_in_use` are TRANSIENT, `idempotency_error` is `IDEMPOTENCY_MISMATCH`). Stripe prunes idempotency keys after *at least* 24 hours, so the 23 h cutoff above is deliberately conservative. The circuit breaker is shared by all operations; while it is open calls fail fast with a TRANSIENT `PaymentGatewayException` (`circuitOpen()`), and workers back off without counting a Stripe failure. Metrics `stripe.api.latency{operation,outcome}` and `stripe.api.errors{type}`; the Stripe `Request-Id` is logged, secrets never.
@@ -325,7 +331,7 @@ Lookup: payments by `payment_intent` id, fallback `metadata.paymentId`; refunds 
 Effects, in one transaction with the event's new status: reaching `REQUIRES_ACTION` / `SUCCEEDED` / `CANCELED` publishes `PaymentActionRequired` / `PaymentSucceeded` / `PaymentCanceled` (whatever reported it); `payment_failed` stores `last_payment_error.code`, `decline_code` and `message` (sanitized: Stripe-shaped codes only, no control characters, card-number-like digits or secrets, ≤ 500 chars) and publishes `PaymentAttemptFailed` for every failed attempt, also when the status does not move; `charge.refunded` completes the open refund and publishes `PaymentRefunded`; `refund.failed` fails it and publishes `PaymentRefundFailed`; a dispute sets `disputed` and publishes `PaymentDisputed` once. Operations: [runbooks/webhooks.md](runbooks/webhooks.md).
 
 ### 8.4 Reconciliation
-Every 5 min: payments in non-terminal states not updated for 10 min with a PI id ⇒ `retrieve` ⇒ apply via the same state machine (source `RECONCILIATION`). Drift is logged and counted (it means a webhook was lost or late). Rate-limited. Manual trigger: `POST /admin/reconciliation/run`.
+Every 5 min: payments in `REQUIRES_PAYMENT_METHOD`, `REQUIRES_ACTION` or `PROCESSING`, not updated for 10 min and with a PI id, are retrieved and applied via the same state machine (source `RECONCILIATION`). Drift is logged and counted (it means a webhook was lost or late). Rate-limited. Manual trigger: `POST /admin/reconciliation/run`.
 
 Implementation (details and reasoning in the ADR-0010 addendum): `ReconcilePaymentsService`, scheduled by `ReconciliationJob` (`payment.reconciliation.*`: `interval` 5m, `stale-after` 10m, `batch-size`, `rate-limit-per-second` 5).
 - Candidates: `REQUIRES_PAYMENT_METHOD` / `REQUIRES_ACTION` / `PROCESSING` with a PaymentIntent, `updated_at` and `last_reconciled_at` older than `stale-after`; claimed with `FOR UPDATE SKIP LOCKED` and marked in `last_reconciled_at`, so instances never check the same payment and a checked payment rests for the stale period.
@@ -333,6 +339,7 @@ Implementation (details and reasoning in the ADR-0010 addendum): `ReconcilePayme
 - A changed status is a **drift**: history (source `RECONCILIATION`), outbox event exactly as for the missed webhook (e.g. `PaymentSucceeded`; a lost `payment_failed` becomes `PaymentAttemptFailed`), WARN, `reconciliation.drift{from,to}`. When Stripe agrees nothing is written and nothing is published.
 - A payment that cannot be checked (Stripe unavailable, unusable status) is released and retried by the next run; the run never fails because of one payment. A run that gets no rate-limit permit in time defers the rest.
 - F21: a webhook that changes the payment while Stripe is being asked wins the optimistic lock or finds the change made — one transition, one event.
+- The nominal detection delay is about 10–15 minutes plus run time when Stripe is available and the candidate fits in the batch. This is not an SLA: outages, batch limits, scheduler contention and rate limiting can extend it. The job does not retrieve refunds or disputes; lost refund/dispute webhooks must be redelivered ([runbook](runbooks/webhooks.md#4-events-stripe-could-not-deliver)).
 - `GET /admin/reconciliation/last` returns the in-memory summary of the latest run of the instance (`checked`, `drifted`, `unchanged`, `failed`, `deferred`, the drifts); 404 before the first run. Both endpoints need role `ops`.
 
 ### 8.5 Test payment methods
@@ -346,7 +353,7 @@ Used by the test-support confirm endpoint and the demo (verify IDs against docs.
 |---|---|---|---|---|---|
 | `order.events.v1` | order-service | `payment-service` | orderId | 3 / 6 | 7 d |
 | `payment.events.v1` | payment-service | `order-service` | orderId | 3 / 6 | 7 d |
-| `<topic>-retry-*`, `<topic>-dlt` | Spring Kafka | DLT persister | orderId | as source | 14 d |
+| `<topic>-retry-*`, `<topic>-dlt` | Spring Kafka | source consumer group (retry), `<service>-dlt-persister` (DLT) | orderId | as source | 14 d |
 
 ### 9.2 Envelope (JSON)
 
@@ -366,7 +373,7 @@ Used by the test-support confirm endpoint and the demo (verify IDs against docs.
 }
 ```
 
-`correlationId` starts at the edge: the `X-Correlation-Id` request header when it is a UUID, otherwise a new one (echoed in the response); consumers pass the consumed event's id on, and a scheduled job uses one id per run. `causationId` is the consumed event that caused the change; it is absent for API calls and jobs.
+`correlationId` starts at the edge: the `X-Correlation-Id` request header when it is a UUID, otherwise a new one (echoed in the response); consumers pass the consumed event's correlation id on, and a scheduled job uses one id per run. `causationId` is the consumed Kafka event that started the work; it is absent for API calls and jobs. Workers and webhook notifications retain that originating event id; Stripe event ids are stored separately in payment history.
 
 Kafka headers: `eventType`, `eventVersion`, `correlationId`, `traceparent`. Versioning: additive changes keep the version; breaking changes introduce a new version, published in parallel during migration. JSON Schemas live in `libs/event-contracts` — ADR-0011.
 
@@ -387,7 +394,7 @@ Kafka headers: `eventType`, `eventVersion`, `correlationId`, `traceparent`. Vers
 | PaymentRefundFailed | payment | paymentId, orderId, refundRequestId, failureReason |
 | PaymentDisputed | payment | paymentId, orderId, disputeId, reason |
 
-Unknown event types are skipped (forward compatibility), not dead-lettered.
+Unknown event types and versions are skipped (forward compatibility), not dead-lettered.
 
 ## 10. Data Model
 
@@ -409,7 +416,9 @@ Unknown event types are skipped (forward compatibility), not dead-lettered.
 - `payment_status_history(id, payment_id, from_status, to_status, source STRIPE_API|WEBHOOK|RECONCILIATION|LOCAL, stripe_event_id, occurred_at)`.
 - `stripe_webhook_event(event_id PK, type, api_version, livemode, stripe_created_at, payload jsonb, status RECEIVED|PROCESSED|IGNORED|FAILED|DEAD (the constraint also admits STALE_IGNORED, which is not written: a stale report ends PROCESSED, §8.3), attempts, next_attempt_at, last_error, received_at, processed_at)`.
 
-Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 24 h.
+Automatic retention: published outbox rows 7 d; inbox rows 14 d; HTTP idempotency records expire after 24 h.
+Webhook rows have a 30-day retention target, but no cleanup job is implemented; dead-letter rows also require manual
+cleanup. See [webhook housekeeping](runbooks/webhooks.md#9-housekeeping) and [dead-letter housekeeping](runbooks/dlq.md#6-housekeeping).
 
 ## 11. API
 
@@ -436,7 +445,7 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 **Both services:** `GET /admin/dead-letters`, `GET /admin/dead-letters/{id}`, `POST /admin/dead-letters/{id}/replay`, `POST /admin/dead-letters/{id}/resolve` (ops). Actuator: `health` and `info` public; everything else (`metrics`) role `ops`. Errors: RFC 9457 ProblemDetail.
 
 **Implementation notes (order-service API).**
-- *Who may call what* is decided per endpoint in the security filter chain (`SecurityConfiguration`); *which orders* a caller may see is decided in the use cases (`Caller`: `sub` plus an admin flag). A customer asking for an order that is not theirs gets exactly the 404 of a missing id. Roles: `GET /products` any authenticated caller; `POST /orders`, `POST /orders/{id}/cancel` role `customer` (an admin cannot cancel on a customer's behalf); `GET /orders[/{id}]` `customer` (own) or `admin` (all); `POST /orders/{id}/refund` `admin`. `ops` has no business endpoints, only actuator and (later) the admin endpoints.
+- *Who may call what* is decided per endpoint in the security filter chain (`SecurityConfiguration`); *which orders* a caller may see is decided in the use cases (`Caller`: `sub` plus an admin flag). A customer asking for an order that is not theirs gets exactly the 404 of a missing id. Roles: `GET /products` any authenticated caller; `POST /orders`, `POST /orders/{id}/cancel` role `customer` (an admin cannot cancel on a customer's behalf); `GET /orders[/{id}]` `customer` (own) or `admin` (all); `POST /orders/{id}/refund` `admin`. `ops` has no order/payment endpoints; it has Actuator and the admin endpoints listed above.
 - *Tokens*: signature (JWKS, RS256 only), `iss`, `exp`/`nbf` and `aud=order-service` are validated; the realm roles `customer|admin|ops` become `ROLE_*`, every other realm role grants nothing. The JWKS location is configured separately (`KEYCLOAK_JWK_SET_URI`) from the issuer (`KEYCLOAK_ISSUER_URI`), because inside a container network Keycloak is reached under another name than the one tokens carry. Stateless, no CSRF, no cookies; 401 carries `WWW-Authenticate: Bearer`.
 - *Responses*: `201` + `Location` for create, `200` for cancel, `202` for refund (the money moves asynchronously); an order carries its lines (name and price as copied from the catalog) and its status history; a list holds summaries. Lists are `{content, page, size, totalElements, totalPages}`, `page` counted from 0, `size` 1–100 (default 20), always newest first (`createdAt` desc, id desc as tie-breaker).
 - *Errors* are RFC 9457 problems, `Content-Type: application/problem+json`, `type = urn:problem-type:<code>`:
@@ -456,7 +465,7 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 
   The `Idempotency-Key` problems (400/409/422/413) are written by `platform-idempotency-starter` with its own `urn:opp:problem:*` types (ADR-0006); unifying the two prefixes is a follow-up.
 - *Strict JSON*: unknown properties are ignored (so client-sent prices, totals and `customerId` never matter), but `1.5` or `"2"` are not a quantity.
-- *Idempotency*: `POST /orders`, `/cancel` and `/refund` are `@Idempotent` (24 h). A replay returns the stored answer, even a 404 or 409; a genuinely new request meets the new state (cancelling twice with two keys is a 409).
+- *Idempotency*: `POST /orders`, `/cancel` and `/refund` are `@Idempotent` (24 h). A replay returns the stored answer, including a 404; 409 and 429 are not cached; a genuinely new request meets the new state (cancelling twice with two keys is a 409).
 - *OpenAPI*: `/v3/api-docs` (+ `.yaml`) and Swagger UI exist only with `springdoc.api-docs.enabled=true`, which only the `local` profile sets; elsewhere they are 401/404. The document declares the bearer scheme, the `Idempotency-Key` header and the problem responses with examples.
 - *Events*: cancel and refund change the order and register `OrderCancelled` / `OrderRefundRequested` on the aggregate; the use case hands them to the outbox in the transaction that saves the order (§6.4, §6.5).
 
@@ -468,7 +477,7 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 - Ownership: `customerId = jwt.sub`; foreign resources return 404 (no existence disclosure).
 - Webhook endpoint: no JWT; HMAC signature + timestamp tolerance + livemode guard + body limit; CSRF disabled for API and webhook paths (stateless).
 - Secrets only from environment; `LiveModeGuard`; `client_secret` never stored or logged.
-- Card data never touches the platform (Stripe Elements / test PaymentMethods) — minimal PCI scope.
+- The platform accepts no raw card data; the demo uses Stripe Elements or provider test PaymentMethods. PCI compliance is not assessed by this repository.
 - Deliberately no synchronous service-to-service calls ⇒ no service tokens between services — ADR-0013.
 
 ## 13. Observability
@@ -476,10 +485,10 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 What v1.0.0 ships, and what is designed but not part of it.
 
 **Shipped**
-- **Correlation.** A flow has one `correlationId`: the `X-Correlation-Id` header (or a new id) becomes the envelope's `correlationId`, every consumer passes it on, and `causationId` names the event that caused the next. Logs carry `correlationId`, `orderId`, `paymentId` and `stripeEventId` through the MDC; each Stripe call logs Stripe's `Request-Id`. Secrets, client secrets and webhook payloads are never logged.
+- **Correlation.** A flow has one `correlationId`: the `X-Correlation-Id` header (or a new id) becomes the envelope's `correlationId`, every consumer passes it on, and `causationId` names the event that caused the next. HTTP ingress, Kafka consumers and webhook processing populate MDC with available `correlationId`, `orderId`, `paymentId` and `stripeEventId`. Workers keep correlation ids in persisted work and envelopes, but do not populate MDC for every call. The default console format does not render MDC fields; configure a log pattern or structured logging to expose them. Each Stripe call logs Stripe's `Request-Id`. Secrets, client secrets and webhook payloads are never logged.
 - **Metrics** (Micrometer; `/actuator/metrics`, role `ops`):
   `outbox.pending`, `outbox.oldest.age.seconds`, `outbox.publish.{success,failure}`, `inbox.duplicates`, `idempotency.{replays,conflicts}`, `webhook.received{type}`, `webhook.duplicates`, `webhook.signature.failures{reason}`, `webhook.livemode.rejected`, `webhook.processed{outcome}`, `webhook.processing.lag`, `webhook.stale.ignored`, `webhook.dead`, `stripe.api.latency{operation,outcome}`, `stripe.api.errors{type}`, `dlt.messages{topic}`, `reconciliation.checked`, `reconciliation.drift{from,to}`, `reconciliation.{failures,deferred}`, `order.payment.events{type,outcome}`, `payment.initiation{outcome}`, `payment.cancellation{outcome}`, `payment.refund.creation{outcome}`.
-- **Trace context in events.** The outbox stores a `traceparent` header when a tracer is configured and the relay sends it, so a trace can span HTTP → outbox → Kafka → consumer. The services do not configure a tracer or an exporter in v1.0.0, so the header is empty.
+- **Trace context in events.** The outbox stores a `traceparent` header when a tracer is configured and the relay sends it, as a propagation hook. Capturing the header alone does not create or restore consumer/worker spans. The services do not configure a tracer or an exporter in v1.0.0, so the header is empty.
 
 **Designed, not shipped.** OTLP export through the collector to Jaeger with spans across the asynchronous boundaries (consumer, workers, Stripe calls, webhook processing); structured JSON (ECS) logs with `traceId` and `spanId`; the gauges `payments.by.status` and `orders.by.status`; a Prometheus endpoint with a Grafana dashboard ("OPP Overview") and alert rules. The `observability` compose profile starts the collector, Jaeger, Prometheus and Grafana with skeleton configurations (no service targets, no dashboard), so the backends are there for that work. The runbooks name the metrics an alert would watch.
 
@@ -487,11 +496,11 @@ What v1.0.0 ships, and what is designed but not part of it.
 
 | Level | Scope | Infrastructure | Stripe double |
 |---|---|---|---|
-| Unit | state machines, money, backoff, mappers | none (JUnit, jqwik) | — |
+| Unit | state machines, money, backoff, mappers | none (JUnit Jupiter) | — |
 | Starter IT | outbox, inbox, DLT, idempotency | Testcontainers PG + Kafka | — |
 | Service IT | API, security matrix, consumers, workers, webhooks | PG + Kafka + Keycloak | WireMock |
 | Contract smoke | gateway request/response shape | stripe-mock container | stripe-mock |
-| E2E + chaos | both services, sagas, failures from §15 | all containers | WireMock + signed webhooks |
+| E2E + chaos | both services as JVM processes, sagas, failures from §15 | PG + Kafka + Keycloak containers | WireMock + signed webhooks |
 | Architecture | layering rules | ArchUnit | — |
 | Manual demo | real Stripe test mode | docker compose + Stripe CLI | real Stripe |
 
@@ -501,7 +510,7 @@ Global invariants asserted at the end of every E2E test: ≤ 1 succeeded Payment
 
 ## 15. Failure Mode Matrix
 
-Every row is covered by an automated test; [testing.md](testing.md#where-every-failure-mode-is-tested) maps each ID to the tests at the level that proves it best.
+Every row has automated evidence; F02 is covered by ack-ambiguity and duplicate-consumer tests rather than a dedicated relay process-kill test; [testing.md](testing.md#where-every-failure-mode-is-tested) maps each ID to the tests at the level that proves it best.
 
 | ID | Failure | Behaviour | Guarantee |
 |---|---|---|---|
@@ -510,19 +519,19 @@ Every row is covered by an automated test; [testing.md](testing.md#where-every-f
 | F03 | Consumer crashes after DB commit, before offset commit | Redelivery | Inbox dedupes |
 | F04 | Stripe timeout on PI create | Worker retries with same idempotency key | Single PaymentIntent |
 | F05 | Crash between Stripe response and local commit | Retry returns the same PI (idempotency key) | Single PaymentIntent |
-| F06 | Stripe 5xx / 429 storm | Backoff, circuit breaker opens, payments wait in CREATED | Eventual initiation, no hammering |
+| F06 | Stripe 5xx / 429 storm | Backoff, circuit breaker; bounded transient retries can end in INITIATION_FAILED | Bounded request pressure; no guaranteed initiation during prolonged outage |
 | F07 | Stripe permanent 4xx on create | INITIATION_FAILED → order CANCELLED | Customer not charged |
 | F08 | Payment stuck CREATED > 23 h | INITIATION_FAILED (no new key) | No second PI |
 | F09 | Duplicate webhook delivery | PK conflict, 200, no effect | One state change, one event |
 | F10 | Out-of-order webhooks | Stale event ignored by ordering rule | Monotonic state |
-| F11 | Webhook lost / endpoint down | Reconciliation detects drift | Eventual consistency ≤ 15 min |
+| F11 | PaymentIntent webhook lost / endpoint down | Reconciliation checks quiet non-terminal payments | Nominal ~10–15 min plus run time under healthy dependencies; no hard bound (§8.4) |
 | F12 | Invalid signature / replayed old webhook | 400, not stored | No forged state changes |
-| F13 | `livemode=true` event | 400 + alert | Test-only system |
-| F14 | Webhook handler keeps failing | Backoff → DEAD + alert, runbook replay | No silent loss |
+| F13 | `livemode=true` event | 400 + ERROR log + metric | Test-only system |
+| F14 | Webhook handler keeps failing | Backoff → DEAD + ERROR log + metric; manual replay | Stored failure remains visible |
 | F15 | Poison Kafka message | Retry topics → DLT → persisted → replay; an event the business state cannot explain (§6.7) skips the retries | No consumer blockage |
 | F16 | Concurrent requests with same Idempotency-Key | One executes, others 409 or replay | One order |
 | F17 | Same key, different body | 422 | No accidental reuse |
-| F18 | Payment succeeds after order cancelled (by the customer or the payment timeout) | Auto refund (LATE_PAYMENT_AFTER_CANCEL) | Customer not charged for cancelled order |
+| F18 | Payment succeeds after order cancelled (customer or timeout) | Automatic full refund request (LATE_PAYMENT_AFTER_CANCEL) | Asynchronous compensation; refund failure remains visible as REFUND_FAILED |
 | F19 | Cancel PI races with success | `unexpected_state` not retried, success handled as F18 | No stuck state |
 | F20 | Refund fails | REFUND_FAILED, admin retry with a new refundRequestId; a late outcome of the older request is ignored | Visible, recoverable |
 | F21 | Webhook and reconciliation update the same payment | Optimistic lock + state machine | One transition, one event |
@@ -541,6 +550,11 @@ Partial refunds; multi-currency; manual capture (auth/capture split); Debezium C
 
 **Known limitations of v1.0.0** (each with its reason in [backlog.md](backlog.md) or the ADR it belongs to):
 - Tracing export, ECS logs, dashboards and alert rules are not shipped (§13).
+- HTTP response recording is not atomic with the business transaction: a retry after a crash can create another order (§7.3).
+- Webhook retention has no automatic cleanup job; the 30-day policy requires manual housekeeping (§10).
+- Reconciliation covers unfinished PaymentIntent statuses, not pending refunds or disputes (§8.4).
+- Only PaymentIntent initiation has the 23-hour retry cutoff. Refund/cancellation workers reuse their keys but have no age cutoff; after a prolonged interruption, verify the provider outcome before resuming unresolved work.
+- Default workers share a scheduler with the outbox relay; Kafka delays can postpone other jobs (ADR-0004).
 - Error `type` URNs have two prefixes: `urn:problem-type:*` (services) and `urn:opp:problem:*` (the idempotency starter); unifying them is a follow-up.
 - The dead-letter persister's default topic pattern covers every `*-dlt` topic; each service sets its own (§7.4, backlog).
 - Security configuration is duplicated in the two services on purpose (§5.2, payment-service notes); a third service would need a shared starter and its own ADR.
@@ -549,19 +563,21 @@ Partial refunds; multi-currency; manual capture (auth/capture split); Debezium C
 
 ## 18. ADR Index
 
+All decisions remain Accepted after the 2026-10-09 implementation review. The [ADR index](adr/README.md) links each decision to implementation and test evidence; acceptance does not remove the limitations in §17.
+
 | # | Title |
 |---|---|
-| 0001 | Record architecture decisions (MADR) |
-| 0002 | Two services with choreography-based saga |
-| 0003 | Hexagonal architecture per service |
-| 0004 | Transactional outbox with polling relay (vs. CDC, vs. dual write) |
-| 0005 | Inbox-based idempotent consumers |
-| 0006 | Multi-layer idempotency |
-| 0007 | Retry topics + DLT + persisted dead letters; ordering trade-off |
-| 0008 | DB-backed work queues for external calls |
-| 0009 | Webhook ingestion: verify → persist → ack → process asynchronously |
-| 0010 | Out-of-order webhook handling and reconciliation |
-| 0011 | JSON events with explicit versioning (vs. Avro + Schema Registry) |
-| 0012 | Stripe test-mode strategy (WireMock / stripe-mock / Stripe CLI) and live-mode guard |
-| 0013 | Keycloak as IdP; JWT resource servers; no synchronous service-to-service calls |
-| 0014 | Shared platform starters (vs. per-service copies) |
+| [0001](adr/0001-record-architecture-decisions.md) | Record architecture decisions (MADR) |
+| [0002](adr/0002-two-services-choreography-saga.md) | Two services with choreography-based saga |
+| [0003](adr/0003-hexagonal-architecture.md) | Hexagonal architecture per service |
+| [0004](adr/0004-transactional-outbox-polling-relay.md) | Transactional outbox with polling relay (vs. CDC, vs. dual write) |
+| [0005](adr/0005-inbox-idempotent-consumers.md) | Inbox-based idempotent consumers |
+| [0006](adr/0006-multi-layer-idempotency.md) | Multi-layer idempotency |
+| [0007](adr/0007-retry-topics-dlt-ordering-tradeoff.md) | Retry topics + DLT + persisted dead letters; ordering trade-off |
+| [0008](adr/0008-db-backed-work-queues.md) | DB-backed work queues for external calls |
+| [0009](adr/0009-webhook-ingestion.md) | Webhook ingestion: verify → persist → ack → process asynchronously |
+| [0010](adr/0010-out-of-order-webhooks-reconciliation.md) | Out-of-order webhook handling and reconciliation |
+| [0011](adr/0011-json-events-explicit-versioning.md) | JSON events with explicit versioning (vs. Avro + Schema Registry) |
+| [0012](adr/0012-stripe-test-mode-strategy.md) | Stripe test-mode strategy (WireMock / stripe-mock / Stripe CLI) and live-mode guard |
+| [0013](adr/0013-keycloak-jwt-no-sync-calls.md) | Keycloak as IdP; JWT resource servers; no synchronous service-to-service calls |
+| [0014](adr/0014-shared-platform-starters.md) | Shared platform starters (vs. per-service copies) |

@@ -1,6 +1,7 @@
 # ADR-0013: Keycloak as IdP; JWT resource servers; no synchronous service-to-service calls
 
 - Status: Accepted
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
 - Date: 2026-10-08
 - Related: architecture §3, §11, §12
 

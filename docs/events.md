@@ -12,10 +12,11 @@ per event in `src/main/resources/schemas/{EventType}.v{N}.json`. This page is ch
 |---|---|---|---|---|---|
 | `order.events.v1` | order-service | `payment-service` | `orderId` | 3 / 6 | 7 d |
 | `payment.events.v1` | payment-service | `order-service` | `orderId` | 3 / 6 | 7 d |
-| `<topic>-retry-*`, `<topic>-dlt` | Spring Kafka | DLT persister | `orderId` | as source | 14 d |
+| `<topic>-retry-*`, `<topic>-dlt` | Spring Kafka | source consumer group (retry), `<service>-dlt-persister` (DLT) | `orderId` | as source | 14 d |
 
-The key is always the **order id** (also for payment events), so everything about one order is ordered within a
-partition. A consumer skips event types and versions it does not know (they are not dead-lettered).
+The key is always the **order id** (also for payment events), so source-topic publication is ordered per order within a
+partition. Retry topics and replay can change processing order; cross-topic order is not guaranteed
+([architecture §7.4](architecture.md#74-retries-and-dead-letters)). A consumer skips event types and versions it does not know (they are not dead-lettered).
 
 ## Envelope
 
@@ -32,7 +33,7 @@ Every record value is a JSON object (`EventEnvelope`, schema `envelope.v1.json`)
 | `occurredAt` | string (ISO-8601, UTC) | yes | When the event happened, microsecond precision, e.g. `2026-10-08T12:00:00Z`. |
 | `producer` | `order-service` \| `payment-service` | yes | Emitting service. |
 | `correlationId` | string (UUID) | yes | Shared by every event and request of one business flow. |
-| `causationId` | string (UUID) | no | Event or request that directly triggered this event; omitted when there is none. |
+| `causationId` | string (UUID) | no | Consumed Kafka event that started the work; omitted for API/job triggers. Webhook workers retain the originating Kafka causation id; provider event ids live in payment history. |
 | `payload` | object | yes | Event data, see below. |
 
 Kafka headers (set by the messaging starter, not part of this module): `eventType`, `eventVersion`, `correlationId`,
@@ -92,8 +93,11 @@ An order was placed and awaits payment. Triggers payment creation.
 
 ### OrderCancelled
 
-An order was cancelled; payment-service cancels the open PaymentIntent, or refunds a payment that already succeeded
-(`LATE_PAYMENT_AFTER_CANCEL`, architecture §6.4).
+An order was cancelled. Payment-service cancels locally if no PaymentIntent exists, or queues cancellation of a
+cancelable PaymentIntent. A processing or succeeded payment is left unchanged. A late `PaymentSucceeded` causes
+**order-service** to publish `OrderRefundRequested` with `LATE_PAYMENT_AFTER_CANCEL`
+([architecture §6.4](architecture.md#64-cancellation-and-the-late-success-race)). If `OrderCancelled` arrives before
+`OrderCreated`, the missing payment raises a retryable error; no cancellation placeholder is stored.
 
 | Field | Type | Semantics |
 |---|---|---|
@@ -102,7 +106,7 @@ An order was cancelled; payment-service cancels the open PaymentIntent, or refun
 
 ### OrderRefundRequested
 
-A refund of a paid order was requested.
+A full refund was requested by an admin, or automatically after a payment succeeded on a cancelled order.
 
 | Field | Type | Semantics |
 |---|---|---|
@@ -175,13 +179,13 @@ The payment succeeded; the order becomes paid (or is refunded if it was already 
 
 ### PaymentCanceled
 
-The payment was cancelled at the provider; no money was captured. The order is cancelled with `PAYMENT_CANCELED`.
+The payment was cancelled at the provider, or locally before a PaymentIntent existed; no money was captured. The order is cancelled with `PAYMENT_CANCELED`.
 
 | Field | Type | Semantics |
 |---|---|---|
 | `paymentId` | UUID | The payment. |
 | `orderId` | UUID | The order. |
-| `reason` | string | Cancellation reason (provider value, e.g. `requested_by_customer`). |
+| `reason` | string | Provider cancellation reason, or `canceled_before_payment_intent` for local cancellation. |
 
 ### PaymentRefunded
 
@@ -240,7 +244,7 @@ Procedure for `PaymentSucceeded` v1 → v2:
 1. Add the v2 payload record and schema `PaymentSucceeded.v2.json`; register it in `EventCatalog`.
 2. Ship consumers that understand v2 first (v1 consumers skip v2 — an unknown version is an
    `UnknownEventTypeException`, not a dead letter).
-3. Producers publish **both** versions (same topic, same key, same partition) until every consumer has migrated.
+3. Define deduplication across versions before dual publication. Two envelope ids with the same business fact can cause duplicate effects; reusing one id can make the inbox skip the other version. Then publish both versions with the agreed migration policy until every consumer has migrated. This migration tooling is not implemented in v1.0.0.
 4. Stop publishing v1, keep the v1 schema and class until retained messages (7 d, DLT 14 d) have expired, then remove.
 
 A change to the envelope itself (new required field, different semantics) is a new `envelope.v2.json` and is treated
@@ -251,4 +255,5 @@ Rules that apply to every change:
 - Event type names, field names and enum constants are never reused with a different meaning.
 - Every schema change comes with updated tests (`EventSchemaTest` fails when a record and its schema diverge).
 - Unknown event types and versions are skipped by consumers, never dead-lettered; malformed or invalid events of a
-  known type are dead-lettered (retry topics → DLT, architecture §7.4).
+  known type go directly to DLT. Retryable handler failures use blocking retries and retry topics before DLT
+  ([architecture §7.4](architecture.md#74-retries-and-dead-letters)).

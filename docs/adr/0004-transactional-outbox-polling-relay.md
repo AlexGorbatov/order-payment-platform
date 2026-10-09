@@ -1,6 +1,7 @@
 # ADR-0004: Transactional outbox with polling relay (vs. CDC, vs. dual write)
 
 - Status: Accepted
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
 - Date: 2026-10-08 (implementation details added with the outbox implementation)
 - Related: architecture §7.1, §7.5, §10, §13, §15 (F01, F02), ADR-0005, ADR-0014
 

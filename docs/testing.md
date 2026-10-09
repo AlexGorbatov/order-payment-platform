@@ -9,10 +9,10 @@ How the platform is tested, what each level proves, and how to run it. The strat
 | Level | Where | Runs with | Needs Docker | What it proves |
 |---|---|---|---|---|
 | Unit | `*Test` in every module | `./mvnw verify` | no | state machines, money, backoff, mappers; use cases against in-memory ports. JaCoCo gate: ≥ 80 % lines in `domain` and `application` |
-| Architecture | `ArchitectureTest` in both services | `./mvnw verify` | no | layering (ArchUnit): the domain knows no framework, adapters never meet, no Stripe or Kafka call in a transaction |
+| Architecture | `ArchitectureTest` in both services | `./mvnw verify` | no | layering (ArchUnit): the domain knows no framework, adapters never meet, no direct Stripe/Kafka access from annotated transactional methods (port-mediated calls require runtime tests and review) |
 | Starter IT | `*IT` in `libs/platform-*-starter` | `./mvnw verify` | yes (PostgreSQL, Kafka) | outbox, inbox, retry topics, dead letters, HTTP idempotency, each against a real broker and database |
 | Service IT | `*IT` in `services/*` | `./mvnw verify` | yes (PostgreSQL, Kafka, Keycloak) | one service as a Spring context: API and security matrix, consumers, workers, webhooks. Stripe is WireMock; the clock is injected, so retries and timeouts are exact |
-| Contract smoke | `StripeMockContractIT` | `./mvnw verify` | yes (`stripe-mock`) | the gateway sends and reads what the Stripe API specification says |
+| Contract smoke | [`StripeMockContractIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/adapter/out/stripe/StripeMockContractIT.java) | `./mvnw verify` | yes (`stripe-mock`) | the gateway sends and reads what the Stripe API specification says |
 | **E2E and chaos** | `e2e-tests` | `./mvnw verify -Pe2e` | yes | **both services, as the jars the build produces, against real infrastructure**: sagas across services and the failures of §15 that only show up when the pieces run together |
 | Manual demo | `docs/local-setup.md` | by hand | yes | real Stripe in test mode, with the Stripe CLI forwarding webhooks |
 
@@ -43,9 +43,11 @@ the `build` job uploads them as an artifact and `e2e` downloads them. Their loca
 
 CI (`.github/workflows/ci.yml`) has four jobs: `build` (`./mvnw verify`, coverage reports, the service jars as an artifact),
 `e2e` (needs `build`; the scenarios above, 25 minutes at most), `images` (the compose files are valid and both images build) and
-`badges` (pushes to `main` only: publishes the coverage number for the README badge to the `badges` branch). The number is the
+`badges` (pushes to `main` only: publishes an overall coverage number to the `badges` branch). The number is the
 line coverage of everything JaCoCo measures in the libraries and services, computed by `.github/scripts/coverage-badge.sh`;
 the 80 % gate of the build applies to `domain` and `application`.
+
+The README currently displays the enforced coverage gate; the measured-coverage endpoint is not yet available.
 
 Logs of the two services are written to `e2e-tests/target/e2e-logs/` (appended across restarts within a run). When a
 scenario fails, the tail of both is printed with the failure, and CI uploads the directory.
@@ -118,6 +120,8 @@ platform's guarantees depend on:
   does. Events carry strictly increasing `created` seconds.
 - **A journal** of every API call (operation, order, idempotency key, whether it was a replay) for assertions.
 
+The simulator's refund-failure scenario keeps a refund pending until the test supplies its outcome. Stripe documents a different sequence for [the real `pm_card_refundFail` test method](https://docs.stripe.com/testing#refunds): an initially succeeded refund later fails. That provider sequence is not reproduced by this E2E scenario; the platform treats a failed report after an applied refund success as stale (architecture §5.3).
+
 ### Helpers
 
 | Class | Role |
@@ -156,48 +160,54 @@ Names carry the flow of [§6](architecture.md#6-key-flows) or the failure ID of 
 
 | Class | Test | Covers |
 |---|---|---|
-| `PaymentFlowsIT` | `flow_6_1_happyPath` | order → PaymentIntent → payment → webhook → `PAID`; client secret only for the owner, `no-store`; one correlation id across the services |
+| [`PaymentFlowsIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/PaymentFlowsIT.java) | `flow_6_1_happyPath` | order → PaymentIntent → payment → webhook → `PAID`; client secret only for the owner, `no-store`; one correlation id across the services |
 | | `flow_6_2_declineThenSuccessfulRetry` | declined card keeps the order open; second attempt on the same PaymentIntent pays |
 | | `flow_6_3_authenticationRequiredThenSuccess`, `..._authenticationFailedThenAnotherCardPays` | 3DS success and failure |
-| `CancellationAndRefundIT` | `flow_6_4_paymentTimeoutCancelsOrderAndPaymentIntent`, `flow_6_4_customerCancelsUnpaidOrder` | timeout and customer cancellation cancel the PaymentIntent; ownership |
+| [`CancellationAndRefundIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/CancellationAndRefundIT.java) | `flow_6_4_paymentTimeoutCancelsOrderAndPaymentIntent`, `flow_6_4_customerCancelsUnpaidOrder` | timeout and customer cancellation cancel the PaymentIntent; ownership |
 | | `F18_F19_paymentSucceedsAfterCustomerCancel...`, `F18_F19_paymentSucceedsAfterTimeout...` | payment wins the race against the cancel: Stripe refuses the cancel (not retried), the late success is refunded automatically → `REFUNDED` |
 | | `flow_6_5_adminRefund` | one Stripe refund, `REFUNDED`; role check; the admin's retry with the same key is a replay; refunding twice is a 409 |
 | | `F20_refundFailsThenAdminRetries` | `REFUND_FAILED`, retry with a new request, success |
-| `WebhookResilienceIT` | `F09_duplicateWebhooksOfEveryType...` | seven event types, each delivered three times at once: one effect, one event, all acknowledged |
+| [`WebhookResilienceIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) | `F09_duplicateWebhooksOfEveryType...` | seven event types, each delivered three times at once: one effect, one event, all acknowledged |
 | | `F10_olderWebhookArrivingAfterSuccess...`, `F10_olderFailureArrivingAfterSuccess...` | out-of-order delivery: the older event is processed and dropped as stale |
 | | `F11_lostWebhook_isRecoveredByReconciliation` | a dropped webhook; reconciliation finds the drift (source `RECONCILIATION`); the webhook that arrives late changes nothing (F21) |
-| `ChaosIT` | `F01_kafkaPausedDuringOrderCreation...` | `docker pause` Kafka while orders are created and half of them cancelled; after unpause everything arrives once, in order per key |
+| [`ChaosIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) | `F01_kafkaPausedDuringOrderCreation...` | `docker pause` Kafka while orders are created and half of them cancelled; after unpause everything arrives once, in order per key |
 | | `F05_paymentServiceKilledMidBatch...` | `kill -9` while PaymentIntents are being created (Stripe has made one the service never heard of); after restart exactly one per order, the retry answered from the idempotency key |
 | | `F15_garbageOnTheTopic...` | poison message → dead letter → stored in the consuming service only → consumer not blocked → not replayable (422) → resolved |
 | | `F15_eventForUnknownOrder...` | valid event the state cannot explain → dead letter → data fixed → replay applies it, once |
-| `IdempotencyIT` | `F16_twentyConcurrentCreates...` | 20 concurrent requests, one key: one order, one payment, one PaymentIntent; the rest replay or get 409 |
+| [`IdempotencyIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/IdempotencyIT.java) | `F16_twentyConcurrentCreates...` | 20 concurrent requests, one key: one order, one payment, one PaymentIntent; the rest replay or get 409 |
 | | `F17_sameKeyDifferentBody...` | 422; keys are per customer |
 
 ### Where every failure mode is tested
 
-The E2E does not repeat what a lower level proves better. `-` means the lower level is the proof.
+The E2E does not repeat every lower-level check. `-` means evidence is at a lower level; rows state when a mechanism is tested without reproducing the exact crash. F16 covers concurrent HTTP requests while the service remains running; it does not cover the business-commit/response-recording crash window ([§7.3](architecture.md#73-idempotency-layers)).
 
 | ID | Failure | E2E | Lower level |
 |---|---|---|---|
-| F01 | Kafka down while orders are created | `ChaosIT` | `OutboxKafkaOutageIT` |
-| F02 | relay crashes after send | - | `OutboxKafkaOutageIT`, `InboxConsumerIT` |
-| F03 | consumer crashes before offset commit | - | `InboxConsumerIT`, `OrderSagaIT` |
-| F04 | Stripe timeout on create | (`ChaosIT`, F05 shares the mechanism) | `InitiatePaymentsServiceTest`, `PaymentInitiationIT` |
-| F05 | crash between Stripe's answer and the commit | `ChaosIT` | `PaymentInitiationIT` |
-| F06 | Stripe 5xx / 429 storm, circuit breaker | - | `InitiatePaymentsServiceTest`, `StripePaymentGatewayWireMockTest` |
-| F07 | permanent 4xx on create | - | `InitiatePaymentsServiceTest`, `PaymentInitiationIT` |
-| F08 | payment stuck in `CREATED` for 23 h | - | `InitiatePaymentsServiceTest`, `PaymentInitiationIT` (needs a clock) |
-| F09 | duplicate webhook | `WebhookResilienceIT` | `WebhookIT` |
-| F10 | out-of-order webhooks | `WebhookResilienceIT` | `WebhookIT` |
-| F11 | webhook lost | `WebhookResilienceIT` | `ReconciliationIT` |
-| F12, F13 | bad signature, live mode | - | `WebhookIT`, `StripeWebhookVerifierTest` |
-| F14 | webhook handler keeps failing → `DEAD` | - | `WebhookIT`, `ProcessWebhookEventsServiceTest` |
-| F15 | poison message | `ChaosIT` | `ConsumerRetryAndDltIT`, `DeadLetterAdminIT` |
-| F16, F17 | same Idempotency-Key | `IdempotencyIT` | `IdempotencyIT` (starter) |
-| F18, F19 | payment after cancel; cancel races success | `CancellationAndRefundIT` | `OrderSagaIT`, `CancelAndRefundIT` |
-| F20 | refund fails | `CancellationAndRefundIT` | `CancelAndRefundIT` |
-| F21 | webhook and reconciliation on one payment | `WebhookResilienceIT` (late webhook after reconciliation) | `ReconciliationIT` (lock race) |
-| F22 | duplicate `OrderRefundRequested` | (`flow_6_5` for the HTTP key) | `CancelAndRefundIT`, `ApplyOrderEventServiceTest` |
+| F01 | Kafka down while orders are created | [`ChaosIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) | [`OutboxKafkaOutageIT`](../libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/outbox/OutboxKafkaOutageIT.java) |
+| F02 | relay crashes after send | - | [`OutboxKafkaOutageIT`](../libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/outbox/OutboxKafkaOutageIT.java) permits duplicate publication after ack ambiguity; [`InboxConsumerIT`](../libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/consumer/InboxConsumerIT.java) verifies duplicate effects are suppressed. No dedicated relay process-kill test |
+| F03 | consumer crashes before offset commit | - | [`InboxConsumerIT`](../libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/consumer/InboxConsumerIT.java), [`OrderSagaIT`](../services/order-service/src/test/java/com/altronixsoft/opp/order/OrderSagaIT.java) |
+| F04 | Stripe timeout on create | ([`ChaosIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java), F05 shares the mechanism) | [`InitiatePaymentsServiceTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/application/InitiatePaymentsServiceTest.java), [`PaymentInitiationIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/PaymentInitiationIT.java) |
+| F05 | crash between Stripe's answer and the commit | [`ChaosIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) | [`PaymentInitiationIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/PaymentInitiationIT.java) |
+| F06 | Stripe 5xx / 429 storm, circuit breaker | - | [`InitiatePaymentsServiceTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/application/InitiatePaymentsServiceTest.java), [`StripePaymentGatewayWireMockTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/adapter/out/stripe/StripePaymentGatewayWireMockTest.java) |
+| F07 | permanent 4xx on create | - | [`InitiatePaymentsServiceTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/application/InitiatePaymentsServiceTest.java), [`PaymentInitiationIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/PaymentInitiationIT.java) |
+| F08 | payment stuck in `CREATED` for 23 h | - | [`InitiatePaymentsServiceTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/application/InitiatePaymentsServiceTest.java), [`PaymentInitiationIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/PaymentInitiationIT.java) (needs a clock) |
+| F09 | duplicate webhook | [`WebhookResilienceIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) | [`WebhookIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/WebhookIT.java) |
+| F10 | out-of-order webhooks | [`WebhookResilienceIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) | [`WebhookIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/WebhookIT.java) |
+| F11 | webhook lost | [`WebhookResilienceIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) | [`ReconciliationIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/ReconciliationIT.java) |
+| F12, F13 | bad signature, live mode | - | [`WebhookIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/WebhookIT.java), [`StripeWebhookVerifierTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/adapter/out/stripe/StripeWebhookVerifierTest.java) |
+| F14 | webhook handler keeps failing → `DEAD` | - | [`WebhookIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/WebhookIT.java), [`ProcessWebhookEventsServiceTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/application/ProcessWebhookEventsServiceTest.java) |
+| F15 | poison message | [`ChaosIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) | [`ConsumerRetryAndDltIT`](../libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/consumer/ConsumerRetryAndDltIT.java), [`DeadLetterAdminIT`](../libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/deadletter/DeadLetterAdminIT.java) |
+| F16, F17 | same Idempotency-Key | [`IdempotencyIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/IdempotencyIT.java) | [`IdempotencyIT`](../libs/platform-idempotency-starter/src/test/java/com/altronixsoft/opp/platform/idempotency/IdempotencyIT.java) (starter) |
+| F18, F19 | payment after cancel; cancel races success | [`CancellationAndRefundIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/CancellationAndRefundIT.java) | [`OrderSagaIT`](../services/order-service/src/test/java/com/altronixsoft/opp/order/OrderSagaIT.java), [`CancelAndRefundIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/CancelAndRefundIT.java) |
+| F20 | refund fails | [`CancellationAndRefundIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/CancellationAndRefundIT.java) | [`CancelAndRefundIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/CancelAndRefundIT.java) |
+| F21 | webhook and reconciliation on one payment | [`WebhookResilienceIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) (late webhook after reconciliation) | [`ReconciliationIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/ReconciliationIT.java) (lock race) |
+| F22 | duplicate `OrderRefundRequested` | (`flow_6_5` for the HTTP key) | [`CancelAndRefundIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/CancelAndRefundIT.java), [`ApplyOrderEventServiceTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/application/ApplyOrderEventServiceTest.java) |
+
+## Documentation verification
+
+The v1.0.0 documentation review on 2026-10-09 checked local file links and GitHub heading anchors across the README, changelog and `docs/`. All seven Mermaid blocks rendered in GitHub's Markdown preview: the [README diagram](https://github.com/AlexGorbatov/order-payment-platform/blob/171858a1d73aaf5c127a61171b573424d0532ad8/README.md#architecture-at-a-glance) and [six architecture diagrams](https://github.com/AlexGorbatov/order-payment-platform/blob/171858a1d73aaf5c127a61171b573424d0532ad8/docs/architecture.md). Their source blocks are unchanged from that commit.
+
+`./mvnw verify` passed with JDK 21 and Docker: 1,584 tests, zero failures, errors or skipped tests, with Spotless and JaCoCo gates passing. This run did not enable the separate E2E profile.
 
 ## Rules for new scenarios
 

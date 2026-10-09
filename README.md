@@ -1,63 +1,65 @@
 # Order & Payment Integration Platform
 
 [![CI](https://github.com/AlexGorbatov/order-payment-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AlexGorbatov/order-payment-platform/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FAlexGorbatov%2Forder-payment-platform%2Fbadges%2Fcoverage.json)](docs/testing.md)
+[![Coverage gate](https://img.shields.io/badge/coverage_gate-%E2%89%A580%25-brightgreen)](docs/testing.md)
 [![License: MIT](https://img.shields.io/github/license/AlexGorbatov/order-payment-platform)](LICENSE)
 
-A reference implementation of an event-driven order and payment integration with **Stripe in test mode only**: two
-Spring Boot services (orders, payments) that exchange events over Kafka and keep each other consistent through crashes,
-duplicates, late and out-of-order Stripe events, without a distributed transaction. It is written for technical clients
-and engineering managers who want to see how a Java integration deals with failure, and for the developer who wants to read
-a worked example. It is not a product: correctness under failure, clarity and defensible decisions come before features,
-and everything runs locally without a Stripe account.
+A Java reference implementation of order and payment integration with **Stripe in test mode only**. Two Spring Boot
+services, each owning its database, coordinate through Kafka and a choreography saga. It is intended for technical clients
+and hiring managers assessing integration engineering: transaction boundaries, recovery from failures, security and
+automated evidence for reliability claims. The local demo and tests run without a Stripe account; real Stripe test mode
+is an optional manual demo.
 
 ## What this demonstrates
 
-1. **Effectively-once effects over at-least-once delivery.** Kafka delivers at least once and the services may crash at any
-   point; every business effect still happens once, through the outbox, the inbox and state machines that only move
-   forward. [Architecture §7](docs/architecture.md#7-reliability-patterns), [ADR-0002](docs/adr/0002-two-services-choreography-saga.md).
+1. **Effectively-once effects over at-least-once delivery.** Outbox delivery can repeat after a crash; the inbox commits
+   with the business change, and aggregate constraints prevent repeated payment and refund creation. Guarantees and
+   the remaining HTTP crash window are explicit in [§7.3](docs/architecture.md#73-idempotency-layers). [Architecture §7](docs/architecture.md#7-reliability-patterns), [ADR-0002](docs/adr/0002-two-services-choreography-saga.md).
 2. **Transactional outbox.** An event is written in the same transaction as the change it announces and sent by a polling
-   relay with `SKIP LOCKED`; a crash after sending produces a duplicate, never a loss.
+   relay with `SKIP LOCKED`; a crash after sending can cause a duplicate publication.
    [`OutboxRelay`](libs/platform-messaging-starter/src/main/java/com/altronixsoft/opp/platform/messaging/outbox/OutboxRelay.java),
-   [ADR-0004](docs/adr/0004-transactional-outbox-polling-relay.md), `OutboxKafkaOutageIT`.
+   [ADR-0004](docs/adr/0004-transactional-outbox-polling-relay.md), [`OutboxKafkaOutageIT`](libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/outbox/OutboxKafkaOutageIT.java).
 3. **Inbox (idempotent consumers).** The processed-event record is written in the transaction of the business change, so a
-   redelivery is recognised and skipped.
+   redelivery within inbox retention is recognised and skipped.
    [`InboxGuard`](libs/platform-messaging-starter/src/main/java/com/altronixsoft/opp/platform/messaging/inbox/InboxGuard.java),
-   [ADR-0005](docs/adr/0005-inbox-idempotent-consumers.md), `InboxConsumerIT`.
+   [ADR-0005](docs/adr/0005-inbox-idempotent-consumers.md), [`InboxConsumerIT`](libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/consumer/InboxConsumerIT.java).
 4. **Idempotency at every boundary.** Client to API (`Idempotency-Key` with request hash), service to Stripe (keys derived from
    local ids), Stripe to webhook (event id), Kafka to consumer (inbox).
    [Architecture §7.3](docs/architecture.md#73-idempotency-layers), [ADR-0006](docs/adr/0006-multi-layer-idempotency.md),
    [`IdempotencyInterceptor`](libs/platform-idempotency-starter/src/main/java/com/altronixsoft/opp/platform/idempotency/IdempotencyInterceptor.java),
-   e2e: 20 concurrent creates with one key make one order.
-5. **No network call inside a transaction.** Kafka consumers and the webhook endpoint only write state; Stripe is called by
+   e2e [`IdempotencyIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/IdempotencyIT.java): 20 concurrent creates with one key make one order.
+5. **Stripe calls outside database transactions.** Kafka consumers and the webhook endpoint only write state; Stripe is called by
    DB-backed workers that claim work with leases, call outside any transaction and record the result in a new one. A worker killed
-   after Stripe answered retries with the same key and gets the same PaymentIntent.
+   after Stripe answered retries with the same key within the initiation window and gets the same PaymentIntent. The outbox relay
+   deliberately holds its own row locks while waiting for Kafka ([ADR-0004](docs/adr/0004-transactional-outbox-polling-relay.md)).
    [ADR-0008](docs/adr/0008-db-backed-work-queues.md),
-   [`InitiatePaymentsService`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/application/InitiatePaymentsService.java), e2e `ChaosIT` F05.
+   [`InitiatePaymentsService`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/application/InitiatePaymentsService.java), e2e [`ChaosIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) F05.
 6. **Webhook security and ingestion.** Signature verification with rotation (several secrets), tolerance window, body limit,
    live-mode events refused, persist-then-acknowledge, asynchronous processing with backoff and a `DEAD` state.
    [ADR-0009](docs/adr/0009-webhook-ingestion.md),
    [`ReceiveWebhookService`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/application/ReceiveWebhookService.java),
-   [`LiveModeGuard`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/adapter/out/stripe/LiveModeGuard.java), `WebhookIT`.
+   [`LiveModeGuard`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/adapter/out/stripe/LiveModeGuard.java), [`WebhookIT`](services/payment-service/src/test/java/com/altronixsoft/opp/payment/WebhookIT.java).
 7. **Out-of-order and lost webhooks.** A per-payment watermark plus the state machine drop stale reports; a reconciliation job
    asks Stripe about payments that went quiet and applies the difference through the same state machine.
    [ADR-0010](docs/adr/0010-out-of-order-webhooks-reconciliation.md),
-   [`ReconcilePaymentsService`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/application/ReconcilePaymentsService.java), e2e `WebhookResilienceIT`.
+   [`ReconcilePaymentsService`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/application/ReconcilePaymentsService.java), e2e [`WebhookResilienceIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java).
 8. **Retry topics, dead letters and replay.** Non-blocking retries, a persisted dead-letter store, an operator API to list,
    replay (through the outbox) and resolve, and the ordering trade-off written down.
-   [ADR-0007](docs/adr/0007-retry-topics-dlt-ordering-tradeoff.md), [runbook](docs/runbooks/dlq.md), `DeadLetterAdminIT`.
-9. **Saga compensation.** A payment that succeeds after the order was cancelled (by the customer or the timeout) is refunded
-   automatically; a failed refund is visible and retried by an admin.
-   [Architecture §6.4, §6.5](docs/architecture.md#64-cancellation-and-the-late-success-race), e2e `CancellationAndRefundIT`.
+   [ADR-0007](docs/adr/0007-retry-topics-dlt-ordering-tradeoff.md), [runbook](docs/runbooks/dlq.md), [`DeadLetterAdminIT`](libs/platform-messaging-starter/src/test/java/com/altronixsoft/opp/platform/messaging/deadletter/DeadLetterAdminIT.java).
+9. **Saga compensation.** A payment that succeeds after cancellation triggers an automatic full refund
+   request; a failed refund is visible as `REFUND_FAILED` and can be retried by an admin.
+   [Architecture §6.4, §6.5](docs/architecture.md#64-cancellation-and-the-late-success-race), e2e [`CancellationAndRefundIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/CancellationAndRefundIT.java).
 10. **Keycloak, roles and ownership.** JWT resource servers validating signature, issuer, audience and expiry; realm roles
-    `customer`, `admin`, `ops`; a foreign order is a 404, not a 403. No service-to-service calls, so no service tokens.
-    [ADR-0013](docs/adr/0013-keycloak-jwt-no-sync-calls.md), `OrderApiSecurityIT`.
+    `customer`, `admin`, `ops`; ownership checks return 404 for a foreign order. No service-to-service calls, so no service tokens.
+    [ADR-0013](docs/adr/0013-keycloak-jwt-no-sync-calls.md), [`OrderApiSecurityIT`](services/order-service/src/test/java/com/altronixsoft/opp/order/OrderApiSecurityIT.java).
 11. **A test strategy that matches the claims.** Unit tests for the state machines, ArchUnit for the layering, Testcontainers
     integration tests per mechanism, and an end-to-end suite that runs both services as real processes with a Stripe
     simulator, `kill -9`, `docker pause` of Kafka and invariants checked after every scenario. No test needs a Stripe account.
-    [docs/testing.md](docs/testing.md).
-12. **Operability.** One correlation id from the HTTP request through every event, Micrometer metrics for each mechanism,
-    runbooks for dead letters and webhooks, a demo with six scenarios. Tracing export, ECS logs and dashboards are *not* part of
+    [`PaymentFlowsIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/PaymentFlowsIT.java), [testing guide](docs/testing.md).
+12. **Observability.** Correlation and causation ids in event envelopes, MDC context in ingress and consumers,
+    Micrometer metrics exposed through the protected Actuator API, and recovery runbooks.
+    [`OutboxMetrics`](libs/platform-messaging-starter/src/main/java/com/altronixsoft/opp/platform/messaging/outbox/OutboxMetrics.java),
+    [`WebhookProcessorJob`](services/payment-service/src/main/java/com/altronixsoft/opp/payment/adapter/in/job/WebhookProcessorJob.java). Tracing export, ECS logs and dashboards are *not* part of
     this release ([architecture §13](docs/architecture.md#13-observability)).
 
 ## Architecture at a glance
@@ -102,17 +104,16 @@ are in [§6](docs/architecture.md#6-key-flows), the event contracts in [docs/eve
 
 ## Quickstart
 
-Needs Docker with Compose v2, `curl` and `jq`. The first start builds the two service images (a few minutes).
+Needs Git, Docker with Compose v2, Bash, `curl`, `jq` and `openssl`. The first start builds the two service images (a few minutes).
 
 ```bash
 git clone https://github.com/AlexGorbatov/order-payment-platform.git && cd order-payment-platform
 ./scripts/up.sh --apps              # PostgreSQL, Kafka, Keycloak, stripe-mock, both services, checkout page
 ./scripts/demo.sh success           # place an order, pay, watch it become PAID
-./scripts/demo.sh --list            # the other scenarios
-./scripts/down.sh -v                # stop and delete everything
+./scripts/down.sh                   # stop; keep local data
 ```
 
-No `.env` is needed locally. Kafka UI is at <http://localhost:8085>, the checkout page at <http://localhost:8090>, Swagger UI at
+No `.env` is needed locally. `./scripts/down.sh -v` also removes local database and Kafka volumes. Kafka UI is at <http://localhost:8085>, the checkout page at <http://localhost:8090>, Swagger UI at
 <http://localhost:8081/swagger-ui.html>. Against real Stripe in test mode: `./scripts/up.sh --apps --stripe-test`
 ([docs/demo.md](docs/demo.md)).
 
@@ -133,21 +134,21 @@ state is reached. Locally the script sends the webhooks Stripe would send; with 
 
 ## Failure modes
 
-The full matrix has 22 entries ([architecture §15](docs/architecture.md#15-failure-mode-matrix)); each is tested, and
-[docs/testing.md](docs/testing.md#where-every-failure-mode-is-tested) maps every one to its tests. A selection:
+The full matrix has 22 entries ([architecture §15](docs/architecture.md#15-failure-mode-matrix)); the evidence and test scope are listed in
+[docs/testing.md](docs/testing.md#where-every-failure-mode-is-tested) including the HTTP crash limitation. A selection:
 
-| ID | Failure | Behaviour | Guarantee | End-to-end test |
-|---|---|---|---|---|
-| F01 | Kafka down while orders are created | orders commit, the outbox accumulates, the relay retries | delivered after recovery, in order per key | `ChaosIT` (Kafka paused) |
-| F05 | crash between Stripe's answer and the local commit | the retry carries the same idempotency key | one PaymentIntent per order | `ChaosIT` (service killed) |
-| F09 | duplicate webhook | primary-key conflict, `200` | one state change, one event | `WebhookResilienceIT` |
-| F10 | out-of-order webhooks | the stale report is ignored | monotonic state | `WebhookResilienceIT` |
-| F11 | webhook lost | reconciliation applies Stripe's state | eventual consistency | `WebhookResilienceIT` |
-| F12, F13 | forged or replayed signature; live-mode event | `400`, nothing stored | no forged state, test mode only | `WebhookIT` (service level) |
-| F15 | poison Kafka message | retry topics, dead letter, stored, replayable | no consumer blockage | `ChaosIT` |
-| F16 | concurrent requests, same `Idempotency-Key` | one executes, the others replay or get `409` | one order | `IdempotencyIT` |
-| F18 | payment succeeds after the order was cancelled | automatic refund | customer not charged | `CancellationAndRefundIT` |
-| F20 | refund fails | `REFUND_FAILED`, admin retries with a new request | visible and recoverable | `CancellationAndRefundIT` |
+| ID | Failure | Behaviour | Evidence |
+|---|---|---|---|
+| F01 | Kafka down while orders are created | orders commit; the outbox drains after recovery, in order per key | [`ChaosIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) (Kafka paused) |
+| F05 | crash between Stripe's answer and the local commit | retry within the 23-hour initiation window uses the same key | [`ChaosIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) (service killed) |
+| F09 | duplicate webhook | primary-key conflict, `200`; no repeated effect | [`WebhookResilienceIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) |
+| F10 | out-of-order webhooks | timestamp and allowed-transition checks reject stale reports | [`WebhookResilienceIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) |
+| F11 | webhook lost | reconciliation checks quiet, unfinished PaymentIntents; refunds and disputes require redelivery | [`WebhookResilienceIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) |
+| F12, F13 | forged or replayed signature; live-mode event | `400`; nothing stored | [`WebhookIT`](services/payment-service/src/test/java/com/altronixsoft/opp/payment/WebhookIT.java) |
+| F15 | poison Kafka message | malformed messages go directly to DLT; valid envelopes can be replayed after repair | [`ChaosIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/ChaosIT.java) |
+| F16 | concurrent requests, same `Idempotency-Key` | one executes; others replay or get `409` (HTTP crash window: §7.3) | [`IdempotencyIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/IdempotencyIT.java) |
+| F18 | payment succeeds after the order was cancelled | automatic refund request; completion is asynchronous and may fail | [`CancellationAndRefundIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/CancellationAndRefundIT.java) |
+| F20 | refund fails | `REFUND_FAILED`; admin retries with a new request | [`CancellationAndRefundIT`](e2e-tests/src/test/java/com/altronixsoft/opp/e2e/CancellationAndRefundIT.java) |
 
 ## Repository layout
 
@@ -177,17 +178,20 @@ Needs JDK 21 and Docker.
 ```
 
 `verify` enforces at least 80 % line coverage of `domain` and `application` in both services and checks the formatting
-(`./mvnw spotless:apply` fixes it). The end-to-end suite takes about two minutes and is a separate CI job. The pyramid, the
+(`./mvnw spotless:apply` fixes it). The end-to-end suite runs as a separate CI job; duration depends on image cache and available resources. The pyramid, the
 choice of real processes over in-JVM contexts, and the invariants asserted after every scenario are in [docs/testing.md](docs/testing.md).
 
 ## Stack
 
-Java 21, Maven (wrapper), Spring Boot 4.0 (Web MVC, Data JPA, Validation, Security OAuth2 Resource Server, Actuator), PostgreSQL 17
-with Flyway, Apache Kafka 4 (KRaft) with Spring Kafka, Keycloak 26, `stripe-java` (instance-based `StripeClient`), Resilience4j,
-Micrometer, springdoc-openapi, `uuid-creator` (UUIDv7). No Lombok, no MapStruct. Tests: JUnit 5, AssertJ, Awaitility, Testcontainers
+Java 21, Maven (wrapper), Spring Boot 4.0.8 (Web MVC, Data JPA, Validation, Security OAuth2 Resource Server, Actuator), PostgreSQL 17
+with Flyway, Apache Kafka 4 (KRaft) with Spring Kafka, Keycloak 26, `stripe-java` 34.0.0 (instance-based `StripeClient`), Resilience4j,
+Micrometer, springdoc-openapi, `uuid-creator` (UUIDv7). No Lombok, no MapStruct. Tests: JUnit Jupiter 6, AssertJ, Awaitility, Testcontainers
 (PostgreSQL, Kafka, Keycloak), WireMock, `stripe-mock`, ArchUnit, JaCoCo, Spotless.
 
-## Decisions
+The CI badge tracks `main`. The coverage badge shows the enforced ≥80% line-coverage gate per domain/application package, not a measured overall percentage.
+The `badges` CI job publishes overall coverage on the `badges` branch after a successful build on `main`; that endpoint is not yet available.
+
+## Architecture decisions
 
 Fourteen ADRs, indexed with their status, implementation and tests in [docs/adr](docs/adr/README.md): choreography saga,
 hexagonal layout, outbox, inbox, idempotency, retry topics and dead letters, DB-backed work queues, webhook ingestion,
@@ -209,7 +213,8 @@ out-of-order handling and reconciliation, JSON events, Stripe test-mode strategy
 
 Test mode only, by design (the application refuses to start with a live key). Partial refunds, multi-currency, manual
 capture and a production deployment (Kubernetes) are out of scope. Tracing export, structured logs and dashboards are not
-included; the metrics and correlation ids are. The list with reasons: [architecture §17](docs/architecture.md#17-out-of-scope--future-work).
+included; metrics and correlation ids are available. HTTP response caching has a crash window, webhook cleanup is manual,
+and reconciliation covers unfinished PaymentIntent statuses only. The list with reasons: [architecture §17](docs/architecture.md#17-out-of-scope--future-work).
 
 ## License
 

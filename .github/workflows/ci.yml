@@ -90,3 +90,23 @@ jobs:
             e2e-tests/target/failsafe-reports/
           if-no-files-found: ignore
           retention-days: 7
+
+  # The demo images (compose profile `apps`) must keep building, and the compose files must stay valid.
+  images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate the compose files
+        run: |
+          docker compose -f infra/docker-compose.yml --profile apps --profile stripe-test --profile observability config -q
+          STRIPE_API_KEY=sk_test_ci STRIPE_WEBHOOK_SECRET=whsec_ci \
+            docker compose -f infra/docker-compose.yml -f infra/docker-compose.stripe-test.yml \
+            --profile apps --profile stripe-test config -q
+
+      - name: Build the service images
+        run: |
+          docker build -f infra/Dockerfile --target order-service -t opp/order-service:ci .
+          docker build -f infra/Dockerfile --target payment-service -t opp/payment-service:ci .

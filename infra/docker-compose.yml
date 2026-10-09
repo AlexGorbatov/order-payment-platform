@@ -1,11 +1,12 @@
 # Local infrastructure for the Order & Payment Platform (architecture §16).
 #
 #   default profile : postgres, kafka (+ topic init), kafka-ui, keycloak, stripe-mock
-#   stripe-test     : stripe-cli forwarding real test-mode webhooks to payment-service on the host
+#   apps            : order-service, payment-service (images built from infra/Dockerfile) against stripe-mock
+#   stripe-test     : stripe-cli forwarding real test-mode webhooks to payment-service (on the host, or with `apps`
+#                     together with docker-compose.stripe-test.yml, which also points payment-service at real Stripe)
 #   observability   : otel-collector, jaeger, prometheus, grafana (configs are stubs, filled in T16)
-#   apps            : order-service, payment-service (added in T18)
 #
-# Prefer ./scripts/up.sh and ./scripts/down.sh: they pass the repo-root .env and the right profiles.
+# Prefer ./scripts/up.sh and ./scripts/down.sh: they pass the repo-root .env, the right profiles and the right files.
 # Every variable has a dev default, so a plain `docker compose up -d` in infra/ works without .env.
 
 name: opp
@@ -177,6 +178,129 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------- profile: apps
+  # The two services as containers. By default they run against stripe-mock with the `local` Spring profile (test-support
+  # endpoint on, OpenAPI on); docker-compose.stripe-test.yml switches payment-service to the real Stripe API.
+  #
+  # Inside the network the services reach Kafka as kafka:19092 and PostgreSQL as postgres:5432. Tokens carry
+  # iss=http://localhost:8180/realms/opp (KC_HOSTNAME of keycloak), so that is the issuer the services expect; the signing
+  # keys are fetched from the backchannel address keycloak:8080.
+  #
+  # "Demo tuning" lines shorten the waits so that a scenario takes a minute, not half an hour:
+  #   - an unpaid order is cancelled after 1 minute (production default: 30), checked every 5 seconds;
+  #   - the cancellation worker looks every 15 seconds (default: 2), which leaves a window in which a late payment
+  #     beats the cancellation of its PaymentIntent (scripts/demo.sh timeout-late-payment).
+
+  order-service:
+    profiles: ["apps"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: order-service
+    image: opp/order-service:dev
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      ORDERS_DB_URL: jdbc:postgresql://postgres:5432/orders_db
+      ORDERS_DB_USER: ${ORDERS_DB_USER:-orders}
+      ORDERS_DB_PASSWORD: ${ORDERS_DB_PASSWORD:-orders}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/opp
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/opp/protocol/openid-connect/certs
+      # demo tuning
+      ORDER_PAYMENTTIMEOUT: PT1M
+      ORDER_PAYMENTTIMEOUTJOB_INITIALDELAY: 5s
+      ORDER_PAYMENTTIMEOUTJOB_INTERVAL: 5s
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8081/actuator/health/readiness > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  payment-service:
+    profiles: ["apps"]
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile
+      target: payment-service
+    image: opp/payment-service:dev
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      PAYMENTS_DB_URL: jdbc:postgresql://postgres:5432/payments_db
+      PAYMENTS_DB_USER: ${PAYMENTS_DB_USER:-payments}
+      PAYMENTS_DB_PASSWORD: ${PAYMENTS_DB_PASSWORD:-payments}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KEYCLOAK_ISSUER_URI: http://localhost:8180/realms/opp
+      KEYCLOAK_JWK_SET_URI: http://keycloak:8080/realms/opp/protocol/openid-connect/certs
+      # Not ${STRIPE_API_BASE}: that one in .env is for a service on the host (localhost:12111).
+      STRIPE_API_KEY: ${STRIPE_API_KEY:-sk_test_localdemo}
+      STRIPE_API_BASE: http://stripe-mock:12111
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_demo}
+      # demo tuning
+      PAYMENT_CANCELLATION_INTERVAL: 15s
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+      stripe-mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8082/actuator/health/readiness > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    restart: unless-stopped
+
+  # Demo checkout page (demo/checkout): Keycloak login (Authorization Code + PKCE), products, order, and payment with the
+  # Stripe Payment Element (stripe-test) or the test-support endpoint (local). nginx also proxies /order-api/ and
+  # /payment-api/ to the services, so the browser needs no CORS. http://localhost:8090
+  checkout:
+    profiles: ["apps"]
+    image: nginx:1.27-alpine
+    environment:
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      # true only with docker-compose.stripe-test.yml: stripe-mock's client secrets mean nothing to Stripe.js
+      CHECKOUT_PAYMENT_ELEMENT: "false"
+      NGINX_ENVSUBST_FILTER: "STRIPE_|CHECKOUT_"
+      NGINX_ENVSUBST_OUTPUT_DIR: /usr/share/nginx/html
+    volumes:
+      - ../demo/checkout/index.html:/usr/share/nginx/html/index.html:ro
+      - ../demo/checkout/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../demo/checkout/config.json.template:/etc/nginx/templates/config.json.template:ro
+    ports:
+      - "8090:80"
+    depends_on:
+      order-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/config.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     restart: unless-stopped
 
   # ---------------------------------------------------------------- profile: observability

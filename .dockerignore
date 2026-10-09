@@ -1,0 +1,14 @@
+# The image build needs the Maven reactor and nothing else: keep the context small and the layer cache stable.
+.git
+.idea
+.github
+.env
+.env.*
+**/target
+**/*.log
+docs
+scripts
+demo
+infra
+e2e-tests/src
+**/.DS_Store

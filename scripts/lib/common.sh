@@ -39,8 +39,13 @@ load_env() {
     done < "$ENV_FILE"
 }
 
+# Runs docker compose on infra/docker-compose.yml and the repo-root .env. Files listed in COMPOSE_OVERLAYS (space
+# separated, relative to infra/) are layered on top, e.g. COMPOSE_OVERLAYS=docker-compose.stripe-test.yml.
 compose() {
-    local args=(-f "$COMPOSE_FILE")
+    local args=(-f "$COMPOSE_FILE") overlay
+    for overlay in ${COMPOSE_OVERLAYS:-}; do
+        args+=(-f "$REPO_ROOT/infra/$overlay")
+    done
     [[ -f "$ENV_FILE" ]] && args+=(--env-file "$ENV_FILE")
     docker compose "${args[@]}" "$@"
 }

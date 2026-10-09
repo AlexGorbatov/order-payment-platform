@@ -11,8 +11,18 @@ reconciliation, and Testcontainers-based tests that never need a real Stripe acc
 - [Architecture](docs/architecture.md) — scope, flows, state machines, contracts, data model, failure matrix
 - [Architecture Decision Records](docs/adr/)
 - [Local setup](docs/local-setup.md) — docker compose infrastructure, ports, dev accounts, tokens
+- [Demo](docs/demo.md) — six scenarios locally or against Stripe test mode, and what to look at
 - [Testing](docs/testing.md) — the test pyramid, end-to-end and chaos scenarios, how to run them
 - [Backlog](docs/backlog.md)
+
+## Try it
+
+```bash
+./scripts/up.sh --apps          # infrastructure + both services + checkout page (http://localhost:8090)
+./scripts/demo.sh success       # also: decline-then-success, 3ds, timeout-late-payment, refund, dispute
+```
+
+See [docs/demo.md](docs/demo.md), including how to run the same scenarios against real Stripe in test mode.
 
 ## Build
 

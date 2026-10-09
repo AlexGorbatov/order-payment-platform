@@ -49,6 +49,8 @@ import tools.jackson.databind.json.JsonMapper;
             "payment.webhook-processor.enabled=false",
             "payment.cancellation.enabled=false",
             "payment.refund.enabled=false",
+            "payment.reconciliation.enabled=false",
+            "payment.reconciliation.rate-limit-per-second=1000",
             "payment.webhook-processor.retry-jitter=0",
             "payment.webhook-processor.retry-base-delay=10s",
             "payment.webhook-processor.retry-max-attempts=3",

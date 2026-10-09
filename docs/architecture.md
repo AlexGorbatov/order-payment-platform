@@ -77,7 +77,7 @@ scripts                              token.sh, ops-token.sh, send-test-webhook.s
 docs                                 architecture.md, events.md, adr/, runbooks/, testing.md, demo.md
 ```
 
-Hexagonal layout per service: `domain`, `application`, `adapter.in.{web,kafka,webhook,job}`, `adapter.out.{persistence,stripe,messaging}`, `config`. `adapter.in.job` holds scheduled triggers of use cases (e.g. `PaymentTimeoutJob`); the schedule itself is wired in `config`. Starters are Spring Boot auto-configurations; they ship their own Flyway migrations under `db/migration/platform` (versions `V1000+`).
+Hexagonal layout per service: `domain`, `application`, `adapter.in.{web,kafka,webhook,job}`, `adapter.out.{persistence,stripe,messaging,metrics}`, `config`. `adapter.in.job` holds scheduled triggers of use cases (e.g. `PaymentTimeoutJob`); the schedule itself is wired in `config`. Starters are Spring Boot auto-configurations; they ship their own Flyway migrations under `db/migration/platform` (versions `V1000+`).
 
 ## 5. Domain Model
 
@@ -327,6 +327,14 @@ Effects, in one transaction with the event's new status: reaching `REQUIRES_ACTI
 ### 8.4 Reconciliation
 Every 5 min: payments in non-terminal states not updated for 10 min with a PI id ⇒ `retrieve` ⇒ apply via the same state machine (source `RECONCILIATION`). Drift is logged and counted (it means a webhook was lost or late). Rate-limited. Manual trigger: `POST /admin/reconciliation/run`.
 
+Implementation (T15, details and reasoning in ADR-0010 addendum): `ReconcilePaymentsService`, scheduled by `ReconciliationJob` (`payment.reconciliation.*`: `interval` 5m, `stale-after` 10m, `batch-size`, `rate-limit-per-second` 5).
+- Candidates: `REQUIRES_PAYMENT_METHOD` / `REQUIRES_ACTION` / `PROCESSING` with a PaymentIntent, `updated_at` and `last_reconciled_at` older than `stale-after`; claimed with `FOR UPDATE SKIP LOCKED` and marked in `last_reconciled_at`, so instances never check the same payment and a checked payment rests for the stale period.
+- `retrieve` runs outside any transaction, through a rate limiter; `observedAt` = the second the request started.
+- A changed status is a **drift**: history (source `RECONCILIATION`), outbox event exactly as for the missed webhook (e.g. `PaymentSucceeded`; a lost `payment_failed` becomes `PaymentAttemptFailed`), WARN, `reconciliation.drift{from,to}`. When Stripe agrees nothing is written and nothing is published.
+- A payment that cannot be checked (Stripe unavailable, unusable status) is released and retried by the next run; the run never fails because of one payment. A run that gets no rate-limit permit in time defers the rest.
+- F21: a webhook that changes the payment while Stripe is being asked wins the optimistic lock or finds the change made — one transition, one event.
+- `GET /admin/reconciliation/last` returns the in-memory summary of the latest run of the instance (`checked`, `drifted`, `unchanged`, `failed`, `deferred`, the drifts); 404 before the first run. Both endpoints need role `ops`.
+
 ### 8.5 Test payment methods
 Used by the test-support confirm endpoint and the demo (verify IDs against docs.stripe.com/testing): success `pm_card_visa`; generic decline `pm_card_chargeDeclined`; insufficient funds `pm_card_chargeDeclinedInsufficientFunds`; 3DS required `pm_card_authenticationRequired`; dispute `pm_card_createDispute`; refund failure `pm_card_refundFail`.
 
@@ -396,7 +404,7 @@ Unknown event types are skipped (forward compatibility), not dead-lettered.
 - `order_status_history(id, order_id, from_status, to_status, reason, source, source_event_id, occurred_at)`.
 
 **payments_db**
-- `payment(id, order_id UNIQUE, customer_id, amount_minor, currency, status, stripe_payment_intent_id UNIQUE, last_stripe_event_at, last_error_code, last_decline_code, last_error_message, cancel_requested, cancel_sent_at, disputed, attempts, next_attempt_at, created_at, updated_at, version, correlation_id, caused_by_event_id)`.
+- `payment(id, order_id UNIQUE, customer_id, amount_minor, currency, status, stripe_payment_intent_id UNIQUE, last_stripe_event_at, last_error_code, last_decline_code, last_error_message, cancel_requested, cancel_sent_at, disputed, attempts, next_attempt_at, created_at, updated_at, version, correlation_id, caused_by_event_id, last_reconciled_at)` — `last_reconciled_at` is bookkeeping of the reconciliation job (§8.4), not mapped into the aggregate.
 - `refund(id, payment_id FK, refund_request_id UNIQUE, amount_minor, currency, reason, status, stripe_refund_id UNIQUE, failure_reason, attempts, next_attempt_at, created_at, updated_at, version, correlation_id, caused_by_event_id)`.
 - `payment_status_history(id, payment_id, from_status, to_status, source STRIPE_API|WEBHOOK|RECONCILIATION|LOCAL, stripe_event_id, occurred_at)`.
 - `stripe_webhook_event(event_id PK, type, api_version, livemode, stripe_created_at, payload jsonb, status RECEIVED|PROCESSED|IGNORED|FAILED|DEAD (the constraint also admits STALE_IGNORED, which is not written: a stale report ends PROCESSED, §8.3), attempts, next_attempt_at, last_error, received_at, processed_at)`.
@@ -467,7 +475,7 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 
 - **Tracing:** Micrometer Tracing + OpenTelemetry (OTLP → collector → Jaeger). `traceparent` is captured into outbox headers at write time and restored by the relay, so one trace spans HTTP → outbox → Kafka → consumer → Stripe call. Webhook processing starts a trace tagged with `stripe.event_id`, `stripe.event_type`, `payment.id`, `order.id`.
 - **Logs:** structured JSON (ECS) with `traceId`, `spanId`, `correlationId`, `orderId`, `paymentId`.
-- **Metrics:** `outbox.pending`, `outbox.oldest.age.seconds`, `outbox.publish.{success,failure}`, `inbox.duplicates`, `idempotency.{replays,conflicts}`, `webhook.received{type}`, `webhook.duplicates`, `webhook.signature.failures{reason}`, `webhook.livemode.rejected`, `webhook.processed{outcome}`, `webhook.processing.lag`, `webhook.stale.ignored`, `webhook.dead`, `stripe.api.latency{operation,outcome}`, `stripe.api.errors{type}`, `dlt.messages{topic}`, `reconciliation.{checked,drift}`, `order.payment.events{type,outcome}`, `payment.initiation{outcome}`, `payment.cancellation{outcome}`, `payment.refund.creation{outcome}`, `payments.by.status`, `orders.by.status`.
+- **Metrics:** `outbox.pending`, `outbox.oldest.age.seconds`, `outbox.publish.{success,failure}`, `inbox.duplicates`, `idempotency.{replays,conflicts}`, `webhook.received{type}`, `webhook.duplicates`, `webhook.signature.failures{reason}`, `webhook.livemode.rejected`, `webhook.processed{outcome}`, `webhook.processing.lag`, `webhook.stale.ignored`, `webhook.dead`, `stripe.api.latency{operation,outcome}`, `stripe.api.errors{type}`, `dlt.messages{topic}`, `reconciliation.checked`, `reconciliation.drift{from,to}`, `reconciliation.{failures,deferred}`, `order.payment.events{type,outcome}`, `payment.initiation{outcome}`, `payment.cancellation{outcome}`, `payment.refund.creation{outcome}`, `payments.by.status`, `orders.by.status`.
 - Grafana dashboard "OPP Overview" and alert rules in `infra/`.
 
 ## 14. Testing Strategy

@@ -37,4 +37,18 @@ public interface PaymentRepository {
      * @throws org.springframework.transaction.IllegalTransactionStateException there is no transaction
      */
     List<Payment> claimDueBatch(PaymentStatus status, Instant now, int limit);
+
+    /**
+     * Claims payments for reconciliation (architecture §8.4): {@code REQUIRES_PAYMENT_METHOD}, {@code REQUIRES_ACTION}
+     * or {@code PROCESSING}, with a PaymentIntent, not updated since {@code staleBefore} and not reconciled since then,
+     * oldest first, at most {@code limit}. They are locked with {@code FOR UPDATE SKIP LOCKED} and marked as reconciled
+     * at {@code now}, which keeps other claimers away for the stale period.
+     *
+     * @return the ids of the claimed payments
+     * @throws org.springframework.transaction.IllegalTransactionStateException there is no transaction
+     */
+    List<UUID> claimForReconciliation(Instant staleBefore, Instant now, int limit);
+
+    /** Undoes the claim of {@link #claimForReconciliation}: the payment is due for the next run again. */
+    void releaseReconciliation(UUID paymentId);
 }

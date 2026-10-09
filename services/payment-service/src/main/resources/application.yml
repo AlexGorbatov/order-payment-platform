@@ -58,6 +58,12 @@ payment:
     # the RefundWorker (architecture §6.5): creates the requested refunds at Stripe
     enabled: true
     interval: 2s
+  reconciliation:
+    # ReconciliationJob (architecture §8.4): checks quiet, unfinished payments against Stripe (lost webhooks, F11)
+    enabled: true
+    interval: 5m
+    stale-after: 10m
+    rate-limit-per-second: 5
   webhook-processor:
     # the WebhookProcessor (architecture §6.6): applies stored Stripe webhooks; DEAD after max attempts (F14)
     enabled: true

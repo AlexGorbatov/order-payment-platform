@@ -83,4 +83,22 @@ class JpaPaymentRepository implements PaymentRepository {
                 .map(PaymentMapper::toDomain)
                 .toList();
     }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<UUID> claimForReconciliation(Instant staleBefore, Instant now, int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1");
+        }
+        List<UUID> ids = payments.lockReconciliationCandidates(staleBefore, limit);
+        if (!ids.isEmpty()) {
+            payments.markReconciled(ids, now);
+        }
+        return ids;
+    }
+
+    @Override
+    public void releaseReconciliation(UUID paymentId) {
+        payments.clearReconciled(paymentId);
+    }
 }

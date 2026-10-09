@@ -123,6 +123,32 @@ class InMemoryPayments implements PaymentRepository, FakeTransactions.Rollbackab
         stored = new LinkedHashMap<>((Map<UUID, Payment>) snapshot);
     }
 
+    /** {@code last_reconciled_at}, kept beside the payments like the column beside the mapped ones. */
+    final Map<UUID, Instant> reconciledAt = new LinkedHashMap<>();
+
+    @Override
+    public List<UUID> claimForReconciliation(Instant staleBefore, Instant now, int limit) {
+        List<UUID> ids = stored.values().stream()
+                .filter(p -> p.stripePaymentIntentId() != null)
+                .filter(p -> p.status() == PaymentStatus.REQUIRES_PAYMENT_METHOD
+                        || p.status() == PaymentStatus.REQUIRES_ACTION
+                        || p.status() == PaymentStatus.PROCESSING)
+                .filter(p -> p.updatedAt().isBefore(staleBefore))
+                .filter(p -> !reconciledAt.containsKey(p.id())
+                        || reconciledAt.get(p.id()).isBefore(staleBefore))
+                .sorted(Comparator.comparing(Payment::updatedAt).thenComparing(Payment::id))
+                .limit(limit)
+                .map(Payment::id)
+                .toList();
+        ids.forEach(id -> reconciledAt.put(id, now));
+        return ids;
+    }
+
+    @Override
+    public void releaseReconciliation(UUID paymentId) {
+        reconciledAt.remove(paymentId);
+    }
+
     /** All stored payments, oldest first. */
     List<Payment> all() {
         return new ArrayList<>(stored.values());

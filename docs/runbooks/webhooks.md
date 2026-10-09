@@ -108,8 +108,11 @@ days), or with the Stripe CLI (up to 30 days):
 stripe events resend evt_... --webhook-endpoint=we_...
 ```
 
-Once the reconciliation job of architecture §8.4 is in place, it catches lost webhooks by asking Stripe about payments
-that have not moved for 10 minutes (F11); until then, resending is the way to recover a lost event.
+The reconciliation job (architecture §8.4) also catches lost webhooks: every 5 minutes it asks Stripe about payments
+that have not moved for 10 minutes and applies what Stripe says (F11; `reconciliation.drift{from,to}` counts every
+correction). To run it at once: `POST /admin/reconciliation/run` with an `ops` token; `GET /admin/reconciliation/last`
+shows what the latest run found. Resending is still useful for events that change more than a status (disputes, refund
+outcomes).
 
 Locally with the `stripe-test` profile the Stripe CLI forwards events; its terminal (`docker compose ... logs -f
 stripe-cli`) shows every delivery and the status payment-service answered.

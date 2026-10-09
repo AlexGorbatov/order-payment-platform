@@ -12,9 +12,44 @@ spring:
     open-in-view: false
     hibernate:
       ddl-auto: validate
+  jackson:
+    deserialization:
+      accept-float-as-int: false
+    mapper:
+      allow-coercion-of-scalars: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
   flyway:
     # service migrations first, then the ones the platform starters ship (V1000+)
     locations: classpath:db/migration,classpath:db/migration/platform
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # must equal the `iss` of the tokens; the realm is imported by infra/keycloak/realm-opp.json
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/opp}
+          # where to fetch the signing keys; defaults to <issuer>/protocol/openid-connect/certs
+          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:}
+
+opp:
+  security:
+    audience: payment-service
+
+platform:
+  test-support:
+    # POST /api/v1/test-support/**: confirms PaymentIntents with Stripe test payment methods. Off unless the `local` or
+    # `stripe-test` profile turns it on; with the flag off the endpoint does not exist.
+    enabled: false
+
+payment:
+  initiation:
+    # the PaymentInitiationWorker (architecture §6.1): creates the PaymentIntent of payments waiting in CREATED
+    enabled: true
+    interval: 2s
+    batch-size: 10
+    lease: 5m
+    # Stripe forgets idempotency keys after at least 24 h; a payment older than this is failed, not retried (F08)
+    idempotency-window: 23h
 
 # Stripe (architecture §8, ADR-0012). Only TEST-mode keys are accepted; the application refuses to start otherwise.
 stripe:
@@ -24,3 +59,13 @@ stripe:
   connect-timeout: 5s
   read-timeout: 15s
   max-network-retries: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true

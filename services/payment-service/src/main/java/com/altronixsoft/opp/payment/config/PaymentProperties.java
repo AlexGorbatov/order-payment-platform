@@ -1,0 +1,43 @@
+package com.altronixsoft.opp.payment.config;
+
+import java.time.Duration;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
+
+/**
+ * Settings of payment-service's own behaviour (prefix {@code payment}); the Stripe adapter has its own ({@code stripe.*}).
+ *
+ * @param initiation the PaymentInitiationWorker
+ */
+@ConfigurationProperties("payment")
+record PaymentProperties(@DefaultValue Initiation initiation) {
+
+    /**
+     * Creates the PaymentIntent of payments waiting in {@code CREATED} (architecture §6.1, ADR-0008).
+     *
+     * @param enabled whether the scheduled worker runs; the bean that does the work exists either way
+     * @param interval delay between the end of one run and the start of the next
+     * @param initialDelay delay before the first run
+     * @param batchSize payments claimed per run
+     * @param lease how long a claimed payment is not due again; must exceed the longest Stripe call for the whole batch
+     * @param idempotencyWindow how long a payment may wait in {@code CREATED}: Stripe keeps idempotency keys for at least
+     *     24 hours, so after this window the payment is failed instead of retried with a possibly forgotten key (F08)
+     * @param retryBaseDelay delay after the first transient failure
+     * @param retryMaxDelay upper bound of the backoff
+     * @param retryMaxAttempts transient failures after which the initiation is given up
+     * @param retryJitter fraction of the backoff that may be shaved off at random
+     * @param deferral wait after a failure that is not the payment's fault (open circuit breaker, configuration problem)
+     */
+    record Initiation(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("2s") Duration interval,
+            @DefaultValue("5s") Duration initialDelay,
+            @DefaultValue("10") int batchSize,
+            @DefaultValue("5m") Duration lease,
+            @DefaultValue("23h") Duration idempotencyWindow,
+            @DefaultValue("2s") Duration retryBaseDelay,
+            @DefaultValue("5m") Duration retryMaxDelay,
+            @DefaultValue("8") int retryMaxAttempts,
+            @DefaultValue("0.2") double retryJitter,
+            @DefaultValue("30s") Duration deferral) {}
+}

@@ -524,7 +524,7 @@ Global invariants asserted at the end of every E2E test: ≤ 1 succeeded Payment
 ## 16. Local Environment & Profiles
 
 Ports: order-service 8081, payment-service 8082, Keycloak 8180, Kafka 9092, kafka-ui 8085, PostgreSQL 5432, stripe-mock 12111, Prometheus 9090, Grafana 3000, Jaeger 16686.
-Compose profiles: default (infra), `apps` (both services), `stripe-test` (real Stripe + Stripe CLI), `observability` (OTel collector, Jaeger, Prometheus, Grafana).
+Compose profiles: default (infra), `apps` (both services as containers built from `infra/Dockerfile`, plus the demo checkout page on 8090), `stripe-test` (real Stripe + Stripe CLI; together with `apps` the overlay `infra/docker-compose.stripe-test.yml` also points payment-service at the real API), `observability` (OTel collector, Jaeger, Prometheus, Grafana). `scripts/up.sh` combines them; `scripts/demo.sh <scenario>` runs a scenario against either mode ([demo.md](demo.md)). In the `apps` containers the services reach Kafka as `kafka:19092` and PostgreSQL as `postgres:5432`, expect tokens issued for `http://localhost:8180/realms/opp` and fetch keys from `keycloak:8080`; the profile shortens the payment timeout (1 minute) and the cancellation worker's interval (15 s) for the demo.
 Spring profiles: `local` (stripe-mock, test-support on, payment timeout PT3M), `stripe-test` (real test keys, test-support on), default (test-support off).
 Linux note: Stripe CLI container forwards to `host.docker.internal` via `extra_hosts: host-gateway` when services run outside compose.
 

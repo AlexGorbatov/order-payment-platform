@@ -1,8 +1,9 @@
 # Local Setup
 
 Local infrastructure for development and the manual demo (architecture §8.1, §12, §16).
-Everything lives in [`infra/docker-compose.yml`](../infra/docker-compose.yml); the services themselves run on the host
-(`./mvnw spring-boot:run`) until the `apps` compose profile lands (T18).
+Everything lives in [`infra/docker-compose.yml`](../infra/docker-compose.yml). The services run on the host
+(`./mvnw spring-boot:run`) or as containers (`./scripts/up.sh --apps`, images built from
+[`infra/Dockerfile`](../infra/Dockerfile)); for a guided tour see [demo.md](demo.md).
 
 ## Prerequisites
 
@@ -15,6 +16,8 @@ Everything lives in [`infra/docker-compose.yml`](../infra/docker-compose.yml); t
 ```bash
 cp .env.example .env              # optional: every variable has a dev default
 ./scripts/up.sh                   # default profile; waits until every container is healthy
+./scripts/up.sh --apps            # + order-service, payment-service and the checkout page as containers
+./scripts/up.sh --apps --stripe-test   # ... against real Stripe (test mode) with the Stripe CLI forwarding webhooks
 ./scripts/up.sh --observability   # + OTel collector, Jaeger, Prometheus, Grafana
 ./scripts/down.sh                 # stop, keep data
 ./scripts/down.sh -v              # stop and delete volumes (fresh databases and topics on next start)
@@ -35,16 +38,17 @@ docker compose -f infra/docker-compose.yml ps -a
 | Profile | Containers | Purpose |
 |---|---|---|
 | default | postgres, kafka, kafka-init, kafka-ui, keycloak, stripe-mock | infrastructure for the `local` Spring profile |
-| `stripe-test` | stripe-cli | real Stripe test mode: forwards webhooks to payment-service on the host |
+| `apps` | order-service, payment-service, checkout | the services as containers (stripe-mock, `local` Spring profile) and the demo checkout page |
+| `stripe-test` | stripe-cli | real Stripe test mode: forwards webhooks to payment-service on the host; with `apps` and [`docker-compose.stripe-test.yml`](../infra/docker-compose.stripe-test.yml) (what `up.sh --apps --stripe-test` does) it also switches payment-service to the real Stripe API |
 | `observability` | otel-collector, jaeger, prometheus, grafana | tracing and metrics (configs are stubs until T16) |
-| `apps` | order-service, payment-service | T18 |
 
 ## Ports
 
 | Component | Host port | Notes |
 |---|---|---|
-| order-service | 8081 | runs on the host |
-| payment-service | 8082 | runs on the host; webhook endpoint `/webhooks/stripe` |
+| order-service | 8081 | on the host, or the `apps` container |
+| payment-service | 8082 | on the host, or the `apps` container; webhook endpoint `/webhooks/stripe` |
+| checkout page | 8090 | `apps`; nginx with a proxy to the two services |
 | PostgreSQL | 5432 | |
 | Kafka | 9092 | `localhost:9092` from the host; `kafka:19092` inside the compose network |
 | kafka-ui | 8085 | http://localhost:8085 |
@@ -162,7 +166,7 @@ dead letters: [runbooks/dlq.md](runbooks/dlq.md). Browse them in kafka-ui at htt
 
 ### `local` (default): stripe-mock
 
-payment-service uses `STRIPE_API_BASE=http://localhost:12111` and any `sk_test_` key (it refuses to start without a test-mode key: `STRIPE_API_KEY` is mandatory, live keys are rejected with an explanatory message). stripe-mock is stateless and
+payment-service uses `STRIPE_API_BASE=http://localhost:12111` and any `sk_test_` key of letters and digits (stripe-mock rejects underscores after the prefix; the service refuses to start without a test-mode key: `STRIPE_API_KEY` is mandatory, live keys are rejected with an explanatory message). The containers of the `apps` profile have their own settings (`stripe-mock:12111`, defaults that need no `.env`). stripe-mock is stateless and
 sends no webhooks; signed test webhooks come from `scripts/send-test-webhook.sh`, which signs the synthetic fixtures of
 `services/payment-service/src/test/resources/stripe/events` with `STRIPE_WEBHOOK_SECRET` (the same value
 payment-service verifies with):
@@ -176,6 +180,9 @@ Operating webhooks (dead events, replays, secret rotation, Stripe Dashboard deli
 [runbooks/webhooks.md](runbooks/webhooks.md).
 
 ### Switching to `stripe-test`: real Stripe test mode + Stripe CLI
+
+With the services as containers, [demo.md](demo.md#real-stripe-in-test-mode) is the short way (`./scripts/up.sh --apps
+--stripe-test`). With the services on the host:
 
 1. In `.env` set your **test-mode** keys (`sk_test_…`/`rk_test_…` — live keys are refused by `up.sh` and by
    `LiveModeGuard`), and point the API base at Stripe:
@@ -212,4 +219,6 @@ or via the demo flow.
 - **A container stays `starting`/`unhealthy`:** `docker compose -f infra/docker-compose.yml logs <service>`.
 - **Port already in use:** stop the local PostgreSQL/Kafka or change the host port in the compose file.
 - **Kafka fails after changing `CLUSTER_ID` or the listener setup:** `./scripts/down.sh -v`.
+- **A service fails with `Detected applied migration not resolved locally`:** the database volume comes from other code
+  (a branch with newer migrations); `./scripts/down.sh -v` starts clean.
 - **`invalid_grant` from `token.sh`:** wrong password (`OPP_USER_PASSWORD`) or Keycloak still importing the realm.

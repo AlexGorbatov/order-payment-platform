@@ -1,0 +1,7 @@
+{
+  "stripePublishableKey": "${STRIPE_PUBLISHABLE_KEY}",
+  "paymentElement": ${CHECKOUT_PAYMENT_ELEMENT},
+  "keycloakUrl": "http://localhost:8180",
+  "realm": "opp",
+  "clientId": "opp-web"
+}

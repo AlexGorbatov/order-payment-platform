@@ -15,4 +15,4 @@ case "${1:-}" in
 esac
 
 require docker
-compose --profile observability --profile stripe-test down "${args[@]}"
+compose --profile apps --profile observability --profile stripe-test down "${args[@]}"

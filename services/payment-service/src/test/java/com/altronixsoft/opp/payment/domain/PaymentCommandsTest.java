@@ -111,6 +111,8 @@ class PaymentCommandsTest {
                     original.createdAt(),
                     at(5),
                     7L,
+                    null,
+                    null,
                     original.history());
 
             assertThat(copy.status()).isEqualTo(PaymentStatus.PROCESSING);

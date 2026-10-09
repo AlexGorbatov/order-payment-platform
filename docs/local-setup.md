@@ -132,6 +132,25 @@ order events and consumes payment events through `KAFKA_BOOTSTRAP_SERVERS` (defa
 not paid within `order.payment-timeout` (3 minutes in the `local` profile, 30 by default) is cancelled. Pass
 `X-Correlation-Id: <uuid>` to follow one flow through the logs and events; the response echoes it.
 
+## Paying without a browser (test support)
+
+With the `local` or `stripe-test` profile, payment-service exposes `POST /api/v1/test-support/...` (switch:
+`platform.test-support.enabled`, off everywhere else). After placing an order, wait a few seconds for the
+PaymentIntent, look at the payment and then pay as the customer would, choosing what the card does:
+
+```bash
+TOKEN=$(./scripts/token.sh customer1)
+ORDER=<id from POST /api/v1/orders>
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8082/api/v1/payments/by-order/$ORDER | jq   # status, clientSecret
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  "localhost:8082/api/v1/test-support/payments/by-order/$ORDER/confirm?scenario=success" | jq
+```
+
+`scenario` is `success`, `decline`, `insufficient_funds`, `requires_3ds`, `dispute` or `refund_fail`. The call
+changes nothing in the database: with `stripe-test` the outcome arrives as a webhook (stripe-mock sends none; use the
+signed test webhooks instead). The client secret in the first response is a credential: do not paste it into
+tickets or logs.
+
 ## Kafka topics
 
 Broker auto-creation is disabled (`auto.create.topics.enable=false`). `kafka-init` creates `order.events.v1` and

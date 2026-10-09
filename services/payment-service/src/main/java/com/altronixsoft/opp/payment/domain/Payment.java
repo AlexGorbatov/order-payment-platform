@@ -43,7 +43,10 @@ public final class Payment {
     private final Money amount;
     private final Instant createdAt;
     private final Long version;
+    private final UUID correlationId;
+    private final UUID causedByEventId;
     private final List<PaymentStatusChange> history;
+    private final List<PaymentDomainEvent> domainEvents = new ArrayList<>();
 
     private PaymentStatus status;
     private String stripePaymentIntentId;
@@ -75,6 +78,8 @@ public final class Payment {
             Instant createdAt,
             Instant updatedAt,
             Long version,
+            UUID correlationId,
+            UUID causedByEventId,
             List<PaymentStatusChange> history) {
         this.id = id;
         this.orderId = orderId;
@@ -93,6 +98,8 @@ public final class Payment {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.version = version;
+        this.correlationId = correlationId;
+        this.causedByEventId = causedByEventId;
         this.history = new ArrayList<>(history);
     }
 
@@ -104,6 +111,22 @@ public final class Payment {
      * @throws InvalidPaymentException the amount is not positive or the customer is blank
      */
     public static Payment create(UUID id, UUID orderId, String customerId, Money amount, Instant now) {
+        return create(id, orderId, customerId, amount, now, null, null);
+    }
+
+    /**
+     * Same as above, remembering the business flow the payment belongs to: the events published later (when the worker
+     * has created the PaymentIntent) carry this {@code correlationId} and name {@code causedByEventId}, the consumed
+     * {@code OrderCreated}, as their cause.
+     */
+    public static Payment create(
+            UUID id,
+            UUID orderId,
+            String customerId,
+            Money amount,
+            Instant now,
+            UUID correlationId,
+            UUID causedByEventId) {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(orderId, "orderId");
         Objects.requireNonNull(amount, "amount");
@@ -132,6 +155,8 @@ public final class Payment {
                 now,
                 now,
                 null,
+                correlationId,
+                causedByEventId,
                 List.of());
         payment.history.add(new PaymentStatusChange(null, PaymentStatus.CREATED, PaymentStatusSource.LOCAL, null, now));
         return payment;
@@ -156,6 +181,8 @@ public final class Payment {
             Instant createdAt,
             Instant updatedAt,
             Long version,
+            UUID correlationId,
+            UUID causedByEventId,
             List<PaymentStatusChange> history) {
         return new Payment(
                 id,
@@ -175,6 +202,8 @@ public final class Payment {
                 createdAt,
                 updatedAt,
                 version,
+                correlationId,
+                causedByEventId,
                 history);
     }
 
@@ -273,6 +302,7 @@ public final class Payment {
         stripePaymentIntentId = paymentIntentId;
         moveTo(PaymentStatus.REQUIRES_PAYMENT_METHOD, PaymentStatusSource.STRIPE_API, null, createdAt);
         lastStripeEventAt = createdAt;
+        domainEvents.add(new PaymentDomainEvent.Initiated(id, orderId, paymentIntentId, createdAt));
     }
 
     /**
@@ -285,6 +315,8 @@ public final class Payment {
         lastErrorCode = errorCode;
         lastErrorMessage = truncate(errorMessage);
         moveTo(PaymentStatus.INITIATION_FAILED, PaymentStatusSource.LOCAL, null, now);
+        domainEvents.add(new PaymentDomainEvent.InitiationFailed(
+                id, orderId, errorCode == null || errorCode.isBlank() ? "unknown" : errorCode, now));
     }
 
     /**
@@ -472,6 +504,23 @@ public final class Payment {
     /** The optimistic-locking version; {@code null} until the payment has been stored. */
     public Long version() {
         return version;
+    }
+
+    /** The business flow this payment belongs to (from the {@code OrderCreated} that started it); may be {@code null}. */
+    public UUID correlationId() {
+        return correlationId;
+    }
+
+    /** The event that created this payment ({@code OrderCreated}); may be {@code null}. */
+    public UUID causedByEventId() {
+        return causedByEventId;
+    }
+
+    /** Returns the events registered since the last call and clears them. */
+    public List<PaymentDomainEvent> pullDomainEvents() {
+        List<PaymentDomainEvent> events = List.copyOf(domainEvents);
+        domainEvents.clear();
+        return events;
     }
 
     /** Oldest first. */

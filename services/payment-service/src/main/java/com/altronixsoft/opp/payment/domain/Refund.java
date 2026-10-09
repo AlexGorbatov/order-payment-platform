@@ -20,6 +20,8 @@ public final class Refund {
     private final String reason;
     private final Instant createdAt;
     private final Long version;
+    private final UUID correlationId;
+    private final UUID causedByEventId;
 
     private RefundStatus status;
     private String stripeRefundId;
@@ -41,7 +43,9 @@ public final class Refund {
             Instant nextAttemptAt,
             Instant createdAt,
             Instant updatedAt,
-            Long version) {
+            Long version,
+            UUID correlationId,
+            UUID causedByEventId) {
         this.id = id;
         this.paymentId = paymentId;
         this.refundRequestId = refundRequestId;
@@ -55,6 +59,8 @@ public final class Refund {
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
         this.version = version;
+        this.correlationId = correlationId;
+        this.causedByEventId = causedByEventId;
     }
 
     /**
@@ -65,6 +71,22 @@ public final class Refund {
      */
     public static Refund request(
             UUID id, UUID paymentId, UUID refundRequestId, Money amount, String reason, Instant now) {
+        return request(id, paymentId, refundRequestId, amount, reason, now, null, null);
+    }
+
+    /**
+     * Same as above, remembering the business flow: the events published when the refund is settled carry
+     * {@code correlationId} and name {@code causedByEventId}, the consumed {@code OrderRefundRequested}, as their cause.
+     */
+    public static Refund request(
+            UUID id,
+            UUID paymentId,
+            UUID refundRequestId,
+            Money amount,
+            String reason,
+            Instant now,
+            UUID correlationId,
+            UUID causedByEventId) {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(paymentId, "paymentId");
         Objects.requireNonNull(refundRequestId, "refundRequestId");
@@ -89,7 +111,9 @@ public final class Refund {
                 now,
                 now,
                 now,
-                null);
+                null,
+                correlationId,
+                causedByEventId);
     }
 
     /** Rebuilds a refund from storage. Nothing is validated. */
@@ -106,7 +130,9 @@ public final class Refund {
             Instant nextAttemptAt,
             Instant createdAt,
             Instant updatedAt,
-            Long version) {
+            Long version,
+            UUID correlationId,
+            UUID causedByEventId) {
         return new Refund(
                 id,
                 paymentId,
@@ -120,7 +146,9 @@ public final class Refund {
                 nextAttemptAt,
                 createdAt,
                 updatedAt,
-                version);
+                version,
+                correlationId,
+                causedByEventId);
     }
 
     /** The refund exists at Stripe: {@code REQUESTED → PENDING}; the creation work is done. */
@@ -246,5 +274,15 @@ public final class Refund {
 
     public Long version() {
         return version;
+    }
+
+    /** The business flow this refund belongs to; may be {@code null}. */
+    public UUID correlationId() {
+        return correlationId;
+    }
+
+    /** The event that created this refund ({@code OrderRefundRequested}); may be {@code null}. */
+    public UUID causedByEventId() {
+        return causedByEventId;
     }
 }

@@ -40,6 +40,8 @@ final class PaymentMapper {
                 entity.createdAt,
                 entity.updatedAt,
                 entity.version,
+                entity.correlationId,
+                entity.causedByEventId,
                 history);
     }
 
@@ -52,6 +54,8 @@ final class PaymentMapper {
         entity.amountMinor = payment.amount().amountMinor();
         entity.currency = payment.amount().currencyCode();
         entity.createdAt = payment.createdAt();
+        entity.correlationId = payment.correlationId();
+        entity.causedByEventId = payment.causedByEventId();
         applyChanges(payment, entity);
         return entity;
     }
@@ -101,7 +105,9 @@ final class PaymentMapper {
                 entity.nextAttemptAt,
                 entity.createdAt,
                 entity.updatedAt,
-                entity.version);
+                entity.version,
+                entity.correlationId,
+                entity.causedByEventId);
     }
 
     static RefundEntity toNewEntity(Refund refund) {
@@ -113,6 +119,8 @@ final class PaymentMapper {
         entity.currency = refund.amount().currencyCode();
         entity.reason = refund.reason();
         entity.createdAt = refund.createdAt();
+        entity.correlationId = refund.correlationId();
+        entity.causedByEventId = refund.causedByEventId();
         applyChanges(refund, entity);
         return entity;
     }

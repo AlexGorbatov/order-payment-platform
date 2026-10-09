@@ -1,0 +1,4 @@
+# Real Stripe test mode (+ Stripe CLI webhooks): the test-support endpoint confirms with Stripe's test payment methods.
+platform:
+  test-support:
+    enabled: true

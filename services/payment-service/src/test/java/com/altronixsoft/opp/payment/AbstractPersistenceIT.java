@@ -13,7 +13,14 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /** The persistence adapters against a real PostgreSQL, through the ports only. All subclasses share one context. */
-@SpringBootTest
+@SpringBootTest(
+        properties = {
+            // nothing here may reach Stripe or Kafka: the worker, the order-event consumer and the outbox relay stay
+            // off
+            "payment.initiation.enabled=false",
+            "spring.kafka.listener.auto-startup=false",
+            "platform.outbox.relay.enabled=false"
+        })
 abstract class AbstractPersistenceIT {
 
     @Autowired

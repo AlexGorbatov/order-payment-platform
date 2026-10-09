@@ -143,7 +143,7 @@ dead letters: [runbooks/dlq.md](runbooks/dlq.md). Browse them in kafka-ui at htt
 
 ### `local` (default): stripe-mock
 
-payment-service uses `STRIPE_API_BASE=http://localhost:12111` and any `sk_test_` key. stripe-mock is stateless and
+payment-service uses `STRIPE_API_BASE=http://localhost:12111` and any `sk_test_` key (it refuses to start without a test-mode key: `STRIPE_API_KEY` is mandatory, live keys are rejected with an explanatory message). stripe-mock is stateless and
 sends no webhooks; signed test webhooks come from `scripts/send-test-webhook.sh` (added in a later task) using
 `STRIPE_WEBHOOK_SECRET`.
 

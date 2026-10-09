@@ -73,6 +73,12 @@ class PaymentEntity {
     @Column(name = "updated_at", nullable = false)
     Instant updatedAt;
 
+    @Column(name = "correlation_id")
+    UUID correlationId;
+
+    @Column(name = "caused_by_event_id")
+    UUID causedByEventId;
+
     /** Optimistic-locking token; {@code null} until the row has been inserted. */
     @Version
     Long version;

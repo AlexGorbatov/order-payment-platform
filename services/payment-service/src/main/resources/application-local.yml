@@ -1,0 +1,4 @@
+# Local development against stripe-mock: the test-support endpoint pays without Stripe.js.
+platform:
+  test-support:
+    enabled: true

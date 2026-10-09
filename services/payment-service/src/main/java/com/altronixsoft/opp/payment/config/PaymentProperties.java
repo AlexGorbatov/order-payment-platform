@@ -8,9 +8,11 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * Settings of payment-service's own behaviour (prefix {@code payment}); the Stripe adapter has its own ({@code stripe.*}).
  *
  * @param initiation the PaymentInitiationWorker
+ * @param webhookProcessor the WebhookProcessor
  */
 @ConfigurationProperties("payment")
-record PaymentProperties(@DefaultValue Initiation initiation) {
+record PaymentProperties(
+        @DefaultValue Initiation initiation, @DefaultValue WebhookProcessor webhookProcessor) {
 
     /**
      * Creates the PaymentIntent of payments waiting in {@code CREATED} (architecture §6.1, ADR-0008).
@@ -40,4 +42,28 @@ record PaymentProperties(@DefaultValue Initiation initiation) {
             @DefaultValue("8") int retryMaxAttempts,
             @DefaultValue("0.2") double retryJitter,
             @DefaultValue("30s") Duration deferral) {}
+
+    /**
+     * Processes the stored Stripe webhook events (architecture §6.6, ADR-0009).
+     *
+     * @param enabled whether the scheduled processor runs; the bean that does the work exists either way
+     * @param interval delay between the end of one run and the start of the next
+     * @param initialDelay delay before the first run
+     * @param batchSize events claimed per run
+     * @param lease how long a claimed event is not due again
+     * @param retryBaseDelay delay after the first failed attempt
+     * @param retryMaxDelay upper bound of the backoff
+     * @param retryMaxAttempts failed attempts after which the event is DEAD (F14)
+     * @param retryJitter fraction of the backoff that may be shaved off at random
+     */
+    record WebhookProcessor(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("1s") Duration interval,
+            @DefaultValue("5s") Duration initialDelay,
+            @DefaultValue("50") int batchSize,
+            @DefaultValue("2m") Duration lease,
+            @DefaultValue("2s") Duration retryBaseDelay,
+            @DefaultValue("5m") Duration retryMaxDelay,
+            @DefaultValue("8") int retryMaxAttempts,
+            @DefaultValue("0.2") double retryJitter) {}
 }

@@ -102,6 +102,7 @@ class PaymentCommandsTest {
                     original.stripePaymentIntentId(),
                     original.lastStripeEventAt(),
                     "c",
+                    "insufficient_funds",
                     "m",
                     true,
                     at(3),
@@ -402,8 +403,8 @@ class PaymentCommandsTest {
         void aDisputeIsRecordedOnceInAnyStatus() {
             Payment payment = inStatus(PaymentStatus.SUCCEEDED);
 
-            assertThat(payment.markDisputed(at(40))).isTrue();
-            assertThat(payment.markDisputed(at(41))).isFalse();
+            assertThat(payment.markDisputed("dp_test_1", "fraudulent", at(40))).isTrue();
+            assertThat(payment.markDisputed("dp_test_1", "fraudulent", at(41))).isFalse();
 
             assertThat(payment.disputed()).isTrue();
             assertThat(payment.updatedAt()).as("the repeat changed nothing").isEqualTo(at(40));

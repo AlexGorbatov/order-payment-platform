@@ -48,7 +48,8 @@ class StripeMockContractIT {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(15),
                 2,
-                new StripeProperties.CircuitBreakerProperties(20, 10, 50, Duration.ofSeconds(30), 3));
+                new StripeProperties.CircuitBreakerProperties(20, 10, 50, Duration.ofSeconds(30), 3),
+                new StripeProperties.Webhook(java.util.List.of(), Duration.ofSeconds(300)));
         gateway = StripeConfiguration.newGateway(
                 StripeConfiguration.newClient(properties),
                 StripeConfiguration.newCircuitBreaker(CircuitBreakerRegistry.ofDefaults(), properties.circuitBreaker()),

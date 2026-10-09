@@ -3,6 +3,8 @@ package com.altronixsoft.opp.payment.adapter.out.stripe;
 import com.altronixsoft.opp.payment.application.GatewayErrorClass;
 import com.altronixsoft.opp.payment.application.PaymentGateway;
 import com.altronixsoft.opp.payment.application.PaymentGatewayException;
+import com.altronixsoft.opp.payment.application.WebhookPayloadParser;
+import com.altronixsoft.opp.payment.application.WebhookVerifier;
 import com.stripe.StripeClient;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
@@ -10,6 +12,7 @@ import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.micrometer.tagged.TaggedCircuitBreakerMetrics;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.time.Clock;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -50,6 +53,17 @@ class StripeConfiguration {
     PaymentGateway paymentGateway(
             StripeClient client, CircuitBreaker stripeCircuitBreaker, ObjectProvider<MeterRegistry> meters) {
         return newGateway(client, stripeCircuitBreaker, meters.getIfAvailable(SimpleMeterRegistry::new));
+    }
+
+    /** The signature timestamp is judged by the service's clock; outside a full application, by the system's. */
+    @Bean
+    WebhookVerifier webhookVerifier(StripeProperties properties, ObjectProvider<Clock> clock) {
+        return new StripeWebhookVerifier(properties.webhook(), clock.getIfAvailable(Clock::systemUTC));
+    }
+
+    @Bean
+    WebhookPayloadParser webhookPayloadParser() {
+        return new StripeWebhookPayloadParser();
     }
 
     // ------------------------------------------------------------------------ factories (also used by the tests)

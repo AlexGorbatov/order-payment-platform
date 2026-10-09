@@ -1,0 +1,33 @@
+{
+  "id": "{{EVENT_ID}}",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": {{CREATED}},
+  "data": {
+    "object": {
+      "id": "{{PAYMENT_INTENT_ID}}",
+      "object": "payment_intent",
+      "amount": {{AMOUNT}},
+      "amount_received": 0,
+      "currency": "{{CURRENCY}}",
+      "status": "requires_payment_method",
+      "created": {{CREATED}},
+      "last_payment_error": {
+        "type": "card_error",
+        "code": "card_declined",
+        "decline_code": "insufficient_funds",
+        "message": "Your card has insufficient funds."
+      },
+      "cancellation_reason": null,
+      "livemode": {{LIVEMODE}},
+      "metadata": {
+        "orderId": "{{ORDER_ID}}",
+        "paymentId": "{{PAYMENT_ID}}"
+      }
+    }
+  },
+  "livemode": {{LIVEMODE}},
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "type": "payment_intent.payment_failed"
+}

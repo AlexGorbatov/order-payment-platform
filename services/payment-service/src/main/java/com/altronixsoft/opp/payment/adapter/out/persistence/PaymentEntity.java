@@ -49,6 +49,9 @@ class PaymentEntity {
     @Column(name = "last_error_code")
     String lastErrorCode;
 
+    @Column(name = "last_decline_code")
+    String lastDeclineCode;
+
     @Column(name = "last_error_message", length = 1024)
     String lastErrorMessage;
 

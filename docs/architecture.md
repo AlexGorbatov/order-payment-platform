@@ -238,7 +238,7 @@ flowchart LR
   D -.-> P[Processor: SKIP LOCKED batch]
   P --> H{handler}
   H -- applied --> T[tx: aggregate + history + outbox]
-  H -- stale --> S1[STALE_IGNORED, stale metric]
+  H -- stale --> S1[PROCESSED, stale metric]
   H -- unknown type --> I[IGNORED]
   H -- error --> F[FAILED, backoff] --> P
   F -- max attempts --> DEAD[DEAD + alert]
@@ -314,9 +314,11 @@ Idempotency keys expire after 24 h: a payment still in `CREATED` after 23 h is m
 
 ### 8.3 Webhooks
 Raw body verified with `Stripe-Signature` (HMAC-SHA256, tolerance 300 s), multiple secrets supported for rotation, body ≤ 256 KB, `livemode=true` rejected. Persist-then-ack; processing is asynchronous (§6.6).
-**Ordering rule:** each Payment stores `last_stripe_event_at`. An event is applied only if `event.created ≥ last_stripe_event_at` **and** the transition is allowed; otherwise it is recorded as `STALE_IGNORED` (not an error). Terminal states are never left except `SUCCEEDED → REFUNDED`.
-Handled types: `payment_intent.processing`, `payment_intent.requires_action`, `payment_intent.payment_failed`, `payment_intent.succeeded`, `payment_intent.canceled`, `charge.refunded`, `refund.failed` (verify current refund event names), `charge.dispute.created`. Others ⇒ `IGNORED`.
-Lookup: by `payment_intent` id, fallback `metadata.paymentId`; unknown object ⇒ `IGNORED` + WARN.
+Verification uses the SDK (`Webhook.constructEvent`) with the service's clock and tries every secret of `stripe.webhook.signing-secrets` (`STRIPE_WEBHOOK_SECRET`, comma-separated), so a secret can be rolled without a gap. Refusals: bad/old/missing signature ⇒ 400 + `webhook.signature.failures{reason}`; `livemode=true` ⇒ 400 + ERROR + `webhook.livemode.rejected`; body > 256 KB ⇒ 413. Nothing refused is stored.
+**Ordering rule:** each Payment stores `last_stripe_event_at`. An event is applied only if `event.created ≥ last_stripe_event_at` **and** the transition is allowed; otherwise the report is stale (outcome `STALE_IGNORED` of `applyStripeStatus`, not an error): the payment is untouched, the webhook event is still marked `PROCESSED` — it *was* processed, there is nothing to retry — and `webhook.stale.ignored` counts it. Terminal states are never left except `SUCCEEDED → REFUNDED`.
+Handled types (checked against docs.stripe.com/api/events/types): `payment_intent.processing`, `payment_intent.requires_action`, `payment_intent.payment_failed`, `payment_intent.succeeded`, `payment_intent.canceled` (object: PaymentIntent; its `status` is applied), `charge.refunded` (object: the charge; full refunds only), `refund.failed` (object: the refund), `charge.dispute.created` (object: the dispute). Others ⇒ `IGNORED`. `data.object` is read as plain JSON, so an event rendered with another API version works as long as these fields exist.
+Lookup: payments by `payment_intent` id, fallback `metadata.paymentId`; refunds by Stripe refund id, fallback `metadata.refundId`; unknown object ⇒ `IGNORED` + WARN. An object whose PaymentIntent or Stripe refund id the platform has not recorded yet (the worker that created it has not committed) fails the attempt, so it is retried with backoff.
+Effects, in one transaction with the event's new status: reaching `REQUIRES_ACTION` / `SUCCEEDED` / `CANCELED` publishes `PaymentActionRequired` / `PaymentSucceeded` / `PaymentCanceled` (whatever reported it); `payment_failed` stores `last_payment_error.code`, `decline_code` and `message` (sanitized: Stripe-shaped codes only, no control characters, card-number-like digits or secrets, ≤ 500 chars) and publishes `PaymentAttemptFailed` for every failed attempt, also when the status does not move; `charge.refunded` completes the open refund and publishes `PaymentRefunded`; `refund.failed` fails it and publishes `PaymentRefundFailed`; a dispute sets `disputed` and publishes `PaymentDisputed` once. Operations: [runbooks/webhooks.md](runbooks/webhooks.md).
 
 ### 8.4 Reconciliation
 Every 5 min: payments in non-terminal states not updated for 10 min with a PI id ⇒ `retrieve` ⇒ apply via the same state machine (source `RECONCILIATION`). Drift is logged and counted (it means a webhook was lost or late). Rate-limited. Manual trigger: `POST /admin/reconciliation/run`.
@@ -390,10 +392,10 @@ Unknown event types are skipped (forward compatibility), not dead-lettered.
 - `order_status_history(id, order_id, from_status, to_status, reason, source, source_event_id, occurred_at)`.
 
 **payments_db**
-- `payment(id, order_id UNIQUE, customer_id, amount_minor, currency, status, stripe_payment_intent_id UNIQUE, last_stripe_event_at, last_error_code, last_error_message, cancel_requested, cancel_sent_at, disputed, attempts, next_attempt_at, created_at, updated_at, version, correlation_id, caused_by_event_id)`.
+- `payment(id, order_id UNIQUE, customer_id, amount_minor, currency, status, stripe_payment_intent_id UNIQUE, last_stripe_event_at, last_error_code, last_decline_code, last_error_message, cancel_requested, cancel_sent_at, disputed, attempts, next_attempt_at, created_at, updated_at, version, correlation_id, caused_by_event_id)`.
 - `refund(id, payment_id FK, refund_request_id UNIQUE, amount_minor, currency, reason, status, stripe_refund_id UNIQUE, failure_reason, attempts, next_attempt_at, created_at, updated_at, version, correlation_id, caused_by_event_id)`.
 - `payment_status_history(id, payment_id, from_status, to_status, source STRIPE_API|WEBHOOK|RECONCILIATION|LOCAL, stripe_event_id, occurred_at)`.
-- `stripe_webhook_event(event_id PK, type, api_version, livemode, stripe_created_at, payload jsonb, status RECEIVED|PROCESSED|IGNORED|STALE_IGNORED|FAILED|DEAD, attempts, next_attempt_at, last_error, received_at, processed_at)`.
+- `stripe_webhook_event(event_id PK, type, api_version, livemode, stripe_created_at, payload jsonb, status RECEIVED|PROCESSED|IGNORED|FAILED|DEAD (the constraint also admits STALE_IGNORED, which is not written: a stale report ends PROCESSED, §8.3), attempts, next_attempt_at, last_error, received_at, processed_at)`.
 
 Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 24 h.
 
@@ -415,7 +417,7 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | `/api/v1/payments/by-order/{orderId}` | owner, admin | clientSecret only when actionable; `Cache-Control: no-store` |
-| POST | `/webhooks/stripe` | public (signature) | raw body, ≤ 256 KB |
+| POST | `/webhooks/stripe` | public (signature) | raw body, ≤ 256 KB (413 above); 400 for an invalid signature or a live-mode event; 200 also for a redelivery |
 | POST | `/api/v1/test-support/payments/by-order/{orderId}/confirm?scenario=` | owner | bean exists only if `platform.test-support.enabled=true` |
 | POST | `/admin/reconciliation/run`, GET `/admin/reconciliation/last` | ops | |
 
@@ -461,7 +463,7 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 
 - **Tracing:** Micrometer Tracing + OpenTelemetry (OTLP → collector → Jaeger). `traceparent` is captured into outbox headers at write time and restored by the relay, so one trace spans HTTP → outbox → Kafka → consumer → Stripe call. Webhook processing starts a trace tagged with `stripe.event_id`, `stripe.event_type`, `payment.id`, `order.id`.
 - **Logs:** structured JSON (ECS) with `traceId`, `spanId`, `correlationId`, `orderId`, `paymentId`.
-- **Metrics:** `outbox.pending`, `outbox.oldest.age.seconds`, `outbox.publish.{success,failure}`, `inbox.duplicates`, `idempotency.{replays,conflicts}`, `webhook.received{type}`, `webhook.signature.failures`, `webhook.processing.lag`, `webhook.stale.ignored`, `webhook.dead`, `stripe.api.latency{operation,outcome}`, `stripe.api.errors{type}`, `dlt.messages{topic}`, `reconciliation.{checked,drift}`, `order.payment.events{type,outcome}`, `payments.by.status`, `orders.by.status`.
+- **Metrics:** `outbox.pending`, `outbox.oldest.age.seconds`, `outbox.publish.{success,failure}`, `inbox.duplicates`, `idempotency.{replays,conflicts}`, `webhook.received{type}`, `webhook.duplicates`, `webhook.signature.failures{reason}`, `webhook.livemode.rejected`, `webhook.processed{outcome}`, `webhook.processing.lag`, `webhook.stale.ignored`, `webhook.dead`, `stripe.api.latency{operation,outcome}`, `stripe.api.errors{type}`, `dlt.messages{topic}`, `reconciliation.{checked,drift}`, `order.payment.events{type,outcome}`, `payments.by.status`, `orders.by.status`.
 - Grafana dashboard "OPP Overview" and alert rules in `infra/`.
 
 ## 14. Testing Strategy

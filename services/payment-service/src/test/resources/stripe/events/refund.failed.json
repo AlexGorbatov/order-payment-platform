@@ -1,0 +1,27 @@
+{
+  "id": "{{EVENT_ID}}",
+  "object": "event",
+  "api_version": "2026-09-30.endive",
+  "created": {{CREATED}},
+  "data": {
+    "object": {
+      "id": "{{STRIPE_REFUND_ID}}",
+      "object": "refund",
+      "amount": {{AMOUNT}},
+      "currency": "{{CURRENCY}}",
+      "status": "failed",
+      "failure_reason": "expired_or_canceled_card",
+      "charge": "ch_synthetic_{{SUFFIX}}",
+      "payment_intent": "{{PAYMENT_INTENT_ID}}",
+      "created": {{CREATED}},
+      "metadata": {
+        "refundId": "{{REFUND_ID}}",
+        "paymentId": "{{PAYMENT_ID}}"
+      }
+    }
+  },
+  "livemode": {{LIVEMODE}},
+  "pending_webhooks": 1,
+  "request": { "id": null, "idempotency_key": null },
+  "type": "refund.failed"
+}

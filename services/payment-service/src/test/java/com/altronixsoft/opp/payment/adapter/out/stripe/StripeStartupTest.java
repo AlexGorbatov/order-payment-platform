@@ -106,7 +106,8 @@ class StripeStartupTest {
                 Duration.ofSeconds(3),
                 Duration.ofSeconds(9),
                 2,
-                new StripeProperties.CircuitBreakerProperties(20, 10, 50, Duration.ofSeconds(30), 3));
+                new StripeProperties.CircuitBreakerProperties(20, 10, 50, Duration.ofSeconds(30), 3),
+                new StripeProperties.Webhook(java.util.List.of(), Duration.ofSeconds(300)));
 
         StripeClient client = StripeConfiguration.newClient(properties);
 

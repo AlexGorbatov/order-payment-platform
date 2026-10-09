@@ -3,6 +3,7 @@ package com.altronixsoft.opp.payment;
 import static org.awaitility.Awaitility.await;
 
 import com.altronixsoft.opp.payment.adapter.in.job.PaymentInitiationJob;
+import com.altronixsoft.opp.payment.adapter.in.job.WebhookProcessorJob;
 import com.altronixsoft.opp.payment.application.PaymentEventPublisher;
 import java.io.IOException;
 import java.net.URI;
@@ -34,7 +35,8 @@ import tools.jackson.databind.json.JsonMapper;
  *
  * <p>The initiation worker is not scheduled: a test runs {@link PaymentInitiationJob#run()} itself and moves the
  * {@link MutableClock} to make retries due, which makes every scenario deterministic. The SDK does not retry on its own
- * ({@code stripe.max-network-retries=0}), so one run is one call to Stripe; the circuit breaker is out of the way.
+ * ({@code stripe.max-network-retries=0}), so one run is one call to Stripe; the circuit breaker is out of the way. The
+ * webhook processor is not scheduled either: a test runs {@link WebhookProcessorJob#run()}.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -43,6 +45,12 @@ import tools.jackson.databind.json.JsonMapper;
             "payment.initiation.retry-jitter=0",
             "payment.initiation.retry-base-delay=10s",
             "payment.initiation.lease=5m",
+            "payment.webhook-processor.enabled=false",
+            "payment.webhook-processor.retry-jitter=0",
+            "payment.webhook-processor.retry-base-delay=10s",
+            "payment.webhook-processor.retry-max-attempts=3",
+            "stripe.webhook.signing-secrets=" + AbstractPaymentIT.WEBHOOK_SECRET + ","
+                    + AbstractPaymentIT.PREVIOUS_WEBHOOK_SECRET,
             "platform.test-support.enabled=true",
             "stripe.api-key=sk_test_it_payment",
             "stripe.max-network-retries=0",
@@ -58,6 +66,11 @@ import tools.jackson.databind.json.JsonMapper;
         })
 @Import(TestClockConfiguration.class)
 abstract class AbstractPaymentIT {
+
+    /** The webhook signing secrets of the tests: the current one and one being rolled out. Not real secrets. */
+    static final String WEBHOOK_SECRET = "whsec_it_current";
+
+    static final String PREVIOUS_WEBHOOK_SECRET = "whsec_it_previous";
 
     static final JsonMapper JSON = JsonMapper.builder().build();
     static final Duration ASYNC = Duration.ofSeconds(30);

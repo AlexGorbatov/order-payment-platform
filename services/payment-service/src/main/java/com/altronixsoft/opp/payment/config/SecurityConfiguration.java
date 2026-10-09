@@ -81,6 +81,9 @@ class SecurityConfiguration {
                             .permitAll();
                     requests.requestMatchers("/actuator/**").hasRole("OPS");
                     requests.requestMatchers("/admin/**").hasRole("OPS");
+                    // authenticated by the Stripe-Signature over the raw body, not by a token (§12, ADR-0009)
+                    requests.requestMatchers(HttpMethod.POST, "/webhooks/stripe")
+                            .permitAll();
                     requests.requestMatchers(HttpMethod.GET, "/api/v1/payments/by-order/*")
                             .hasAnyRole("CUSTOMER", "ADMIN");
                     // only the paying customer: the endpoint exists only when platform.test-support.enabled=true

@@ -50,6 +50,12 @@ payment:
     lease: 5m
     # Stripe forgets idempotency keys after at least 24 h; a payment older than this is failed, not retried (F08)
     idempotency-window: 23h
+  webhook-processor:
+    # the WebhookProcessor (architecture §6.6): applies stored Stripe webhooks; DEAD after max attempts (F14)
+    enabled: true
+    interval: 1s
+    batch-size: 50
+    retry-max-attempts: 8
 
 # Stripe (architecture §8, ADR-0012). Only TEST-mode keys are accepted; the application refuses to start otherwise.
 stripe:
@@ -59,6 +65,10 @@ stripe:
   connect-timeout: 5s
   read-timeout: 15s
   max-network-retries: 2
+  webhook:
+    # comma-separated: two secrets while one is rolled (runbook webhooks.md). Empty: every webhook is refused.
+    signing-secrets: ${STRIPE_WEBHOOK_SECRET:}
+    tolerance: 300s
 
 management:
   endpoints:

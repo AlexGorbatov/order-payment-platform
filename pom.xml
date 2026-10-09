@@ -53,6 +53,15 @@
 
     <!-- Coverage gate threshold; the check execution is opted into by service modules -->
     <jacoco.line.coverage.minimum>0.80</jacoco.line.coverage.minimum>
+
+    <!--
+      Test JVMs always run in UTC (the code works in UTC with an injected Clock). Without this they take the machine's
+      zone, which the PostgreSQL JDBC driver sends to the server; PostgreSQL 17 rejects legacy names such as
+      Europe/Kiev, so every Testcontainers test failed on such a machine. argLine is filled in by JaCoCo's
+      prepare-agent goals; the empty default keeps @{argLine} valid when JaCoCo is skipped.
+    -->
+    <argLine></argLine>
+    <test.jvm.args>@{argLine} -Duser.timezone=UTC</test.jvm.args>
   </properties>
 
   <dependencyManagement>
@@ -157,6 +166,7 @@
           <artifactId>maven-surefire-plugin</artifactId>
           <version>${maven-surefire-plugin.version}</version>
           <configuration>
+            <argLine>${test.jvm.args}</argLine>
             <includes>
               <include>**/*Test.java</include>
             </includes>
@@ -168,6 +178,7 @@
           <artifactId>maven-failsafe-plugin</artifactId>
           <version>${maven-failsafe-plugin.version}</version>
           <configuration>
+            <argLine>${test.jvm.args}</argLine>
             <includes>
               <include>**/*IT.java</include>
             </includes>

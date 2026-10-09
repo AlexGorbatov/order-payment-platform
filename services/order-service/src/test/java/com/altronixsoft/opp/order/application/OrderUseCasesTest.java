@@ -35,7 +35,10 @@ class OrderUseCasesTest {
     private static final Caller BOB = Caller.customer("bob");
     private static final Caller ADMIN = Caller.admin("admin-1");
 
+    private static final UUID CORRELATION_ID = UUID.fromString("0199e0a0-3333-7000-8000-000000000003");
+
     private final InMemoryOrders orders = new InMemoryOrders();
+    private final RecordingEventPublisher events = new RecordingEventPublisher();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
 
     private Order orderOf(String customer, int minutesAfterStart) {
@@ -146,28 +149,33 @@ class OrderUseCasesTest {
     @Nested
     class Cancel {
 
-        private final CancelOrderService service = new CancelOrderService(orders, clock);
+        private final CancelOrderService service = new CancelOrderService(orders, events, clock);
 
         @Test
         void theOwnerCancelsAPendingOrder() {
             Order order = orderOf("alice", 0);
 
-            Order cancelled = service.cancel(order.id(), ALICE);
+            Order cancelled = service.cancel(order.id(), ALICE, CORRELATION_ID);
 
             assertThat(cancelled.status()).isEqualTo(OrderStatus.CANCELLED);
             assertThat(cancelled.cancelReason()).isEqualTo(CancelReason.CUSTOMER);
             assertThat(orders.saves).isEqualTo(1);
             assertThat(cancelled.history().getLast().source()).isEqualTo(TransitionSource.API);
             assertThat(cancelled.updatedAt()).isEqualTo(NOW.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
-            assertThat(cancelled.pullDomainEvents()).singleElement().isInstanceOf(OrderDomainEvent.Cancelled.class);
+            assertThat(events.published).singleElement().satisfies(published -> {
+                assertThat(published.event()).isInstanceOf(OrderDomainEvent.Cancelled.class);
+                assertThat(published.correlationId()).isEqualTo(CORRELATION_ID);
+            });
         }
 
         @Test
         void someoneElsesOrderCannotBeCancelledNorFoundOut() {
             Order order = orderOf("alice", 0);
 
-            assertThatThrownBy(() -> service.cancel(order.id(), BOB)).isInstanceOf(OrderNotFoundException.class);
-            assertThatThrownBy(() -> service.cancel(order.id(), ADMIN)).isInstanceOf(OrderNotFoundException.class);
+            assertThatThrownBy(() -> service.cancel(order.id(), BOB, CORRELATION_ID))
+                    .isInstanceOf(OrderNotFoundException.class);
+            assertThatThrownBy(() -> service.cancel(order.id(), ADMIN, CORRELATION_ID))
+                    .isInstanceOf(OrderNotFoundException.class);
             assertThat(order.status()).isEqualTo(OrderStatus.PENDING_PAYMENT);
             assertThat(orders.saves).isZero();
         }
@@ -177,7 +185,7 @@ class OrderUseCasesTest {
             Order order = orderOf("alice", 0);
             order.markPaid(OrderFixtures.api(1));
 
-            assertThatThrownBy(() -> service.cancel(order.id(), ALICE))
+            assertThatThrownBy(() -> service.cancel(order.id(), ALICE, CORRELATION_ID))
                     .isInstanceOf(IllegalOrderTransitionException.class);
             assertThat(orders.saves).isZero();
         }
@@ -187,7 +195,7 @@ class OrderUseCasesTest {
             Order order = orderOf("alice", 0);
             orders.failOnSave = new OrderConcurrentlyModifiedException(order.id());
 
-            assertThatThrownBy(() -> service.cancel(order.id(), ALICE))
+            assertThatThrownBy(() -> service.cancel(order.id(), ALICE, CORRELATION_ID))
                     .isInstanceOf(OrderConcurrentlyModifiedException.class);
         }
     }
@@ -195,7 +203,7 @@ class OrderUseCasesTest {
     @Nested
     class Refund {
 
-        private final RefundOrderService service = new RefundOrderService(orders, () -> REFUND_ID, clock);
+        private final RefundOrderService service = new RefundOrderService(orders, events, () -> REFUND_ID, clock);
 
         private Order paid() {
             Order order = orderOf("alice", 0);
@@ -208,10 +216,11 @@ class OrderUseCasesTest {
         void anAdministratorRequestsAFullRefundOfAPaidOrder() {
             Order order = paid();
 
-            Order refunded = service.refund(order.id(), ADMIN);
+            Order refunded = service.refund(order.id(), ADMIN, CORRELATION_ID);
 
             assertThat(refunded.status()).isEqualTo(OrderStatus.REFUND_REQUESTED);
-            assertThat(refunded.pullDomainEvents())
+            assertThat(refunded.refundRequestId()).isEqualTo(REFUND_ID);
+            assertThat(events.events())
                     .singleElement()
                     .isInstanceOfSatisfying(OrderDomainEvent.RefundRequested.class, event -> {
                         assertThat(event.refundRequestId()).isEqualTo(REFUND_ID);
@@ -225,7 +234,7 @@ class OrderUseCasesTest {
         void customersCannotRefund(String customer) {
             Order order = paid();
 
-            assertThatThrownBy(() -> service.refund(order.id(), Caller.customer(customer)))
+            assertThatThrownBy(() -> service.refund(order.id(), Caller.customer(customer), CORRELATION_ID))
                     .isInstanceOf(OperationNotPermittedException.class);
             assertThat(order.status()).isEqualTo(OrderStatus.PAID);
             assertThat(orders.saves).isZero();
@@ -233,7 +242,7 @@ class OrderUseCasesTest {
 
         @Test
         void aMissingOrderIsNotFound() {
-            assertThatThrownBy(() -> service.refund(UUID.randomUUID(), ADMIN))
+            assertThatThrownBy(() -> service.refund(UUID.randomUUID(), ADMIN, CORRELATION_ID))
                     .isInstanceOf(OrderNotFoundException.class);
         }
 
@@ -241,7 +250,7 @@ class OrderUseCasesTest {
         void anOrderThatIsNotPaidCannotBeRefunded() {
             Order order = orderOf("alice", 0);
 
-            assertThatThrownBy(() -> service.refund(order.id(), ADMIN))
+            assertThatThrownBy(() -> service.refund(order.id(), ADMIN, CORRELATION_ID))
                     .isInstanceOf(IllegalOrderTransitionException.class);
             assertThat(orders.saves).isZero();
         }

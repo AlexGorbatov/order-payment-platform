@@ -40,6 +40,7 @@ public final class Order {
 
     private OrderStatus status;
     private CancelReason cancelReason;
+    private UUID refundRequestId;
     private boolean disputed;
     private Instant updatedAt;
     private final Long version;
@@ -51,6 +52,7 @@ public final class Order {
             Money total,
             OrderStatus status,
             CancelReason cancelReason,
+            UUID refundRequestId,
             boolean disputed,
             Instant createdAt,
             Instant updatedAt,
@@ -62,6 +64,7 @@ public final class Order {
         this.total = total;
         this.status = status;
         this.cancelReason = cancelReason;
+        this.refundRequestId = refundRequestId;
         this.disputed = disputed;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
@@ -94,6 +97,7 @@ public final class Order {
                 total,
                 OrderStatus.PENDING_PAYMENT,
                 null,
+                null,
                 false,
                 trigger.occurredAt(),
                 trigger.occurredAt(),
@@ -115,6 +119,7 @@ public final class Order {
             Money total,
             OrderStatus status,
             CancelReason cancelReason,
+            UUID refundRequestId,
             boolean disputed,
             Instant createdAt,
             Instant updatedAt,
@@ -124,7 +129,18 @@ public final class Order {
             throw new IllegalStateException("Stored total of order " + id + " does not match its lines");
         }
         return new Order(
-                id, customerId, items, total, status, cancelReason, disputed, createdAt, updatedAt, version, history);
+                id,
+                customerId,
+                items,
+                total,
+                status,
+                cancelReason,
+                refundRequestId,
+                disputed,
+                createdAt,
+                updatedAt,
+                version,
+                history);
     }
 
     /** Checks the number of lines of a request, so callers can reject it before looking anything up. */
@@ -189,6 +205,7 @@ public final class Order {
             throw new IllegalOrderTransitionException(id, status, action);
         }
         move(OrderStatus.REFUND_REQUESTED, action, reason.name(), trigger);
+        this.refundRequestId = refundRequestId;
         domainEvents.add(new OrderDomainEvent.RefundRequested(id, refundRequestId, total, reason, trigger));
     }
 
@@ -205,6 +222,41 @@ public final class Order {
         }
         move(OrderStatus.REFUND_FAILED, "be marked refund failed", failureReason, trigger);
         domainEvents.add(new OrderDomainEvent.RefundFailed(id, failureReason, trigger));
+    }
+
+    /**
+     * A payment attempt failed (a declined card, for example) while the order awaits payment. Only the history records
+     * it: the status stays {@code PENDING_PAYMENT} because the customer may retry with another payment method on the
+     * same PaymentIntent until the payment timeout (architecture §6.2). No event is registered.
+     *
+     * @param errorCode the provider's error code
+     * @param declineCode the sanitized decline code, or {@code null}
+     */
+    public void notePaymentAttemptFailed(String errorCode, String declineCode, Trigger trigger) {
+        if (errorCode == null || errorCode.isBlank()) {
+            throw new IllegalArgumentException("errorCode must not be blank");
+        }
+        note(
+                "note a failed payment attempt",
+                "PAYMENT_ATTEMPT_FAILED " + errorCode + (declineCode == null ? "" : "/" + declineCode),
+                trigger);
+    }
+
+    /**
+     * The customer must complete an extra step (3-D Secure) while the order awaits payment. Only the history records it;
+     * the status stays {@code PENDING_PAYMENT} (architecture §6.3). No event is registered.
+     */
+    public void notePaymentActionRequired(Trigger trigger) {
+        note("note a required payment action", "PAYMENT_ACTION_REQUIRED", trigger);
+    }
+
+    private void note(String action, String reason, Trigger trigger) {
+        Objects.requireNonNull(trigger, "trigger");
+        if (status != OrderStatus.PENDING_PAYMENT) {
+            throw new IllegalOrderTransitionException(id, status, action);
+        }
+        history.add(change(status, status, reason, trigger));
+        updatedAt = trigger.occurredAt();
     }
 
     /**
@@ -270,6 +322,14 @@ public final class Order {
     /** Set when the order was cancelled; kept when a refund follows. */
     public CancelReason cancelReason() {
         return cancelReason;
+    }
+
+    /**
+     * The latest refund request, set by {@link #requestRefund} and kept after the refund succeeded or failed;
+     * {@code null} if no refund was ever requested. Refund outcomes for an older request are stale.
+     */
+    public UUID refundRequestId() {
+        return refundRequestId;
     }
 
     public boolean disputed() {

@@ -60,6 +60,11 @@
       <groupId>${project.groupId}</groupId>
       <artifactId>platform-idempotency-starter</artifactId>
     </dependency>
+    <!-- Outbox, inbox, retry topics and dead letters; brings event-contracts and Spring Kafka -->
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>platform-messaging-starter</artifactId>
+    </dependency>
     <!-- UUIDv7 for order ids (behind the IdGenerator port) -->
     <dependency>
       <groupId>com.github.f4b6a3</groupId>
@@ -87,8 +92,19 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-kafka</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>com.github.dasniko</groupId>
       <artifactId>testcontainers-keycloak</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- published events are checked against the JSON Schemas of event-contracts -->
+    <dependency>
+      <groupId>com.networknt</groupId>
+      <artifactId>json-schema-validator</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -129,7 +145,7 @@
         </executions>
       </plugin>
 
-      <!-- Integration tests (*IT) run against Testcontainers PostgreSQL during `verify`. -->
+      <!-- Integration tests (*IT) run against Testcontainers PostgreSQL, Kafka and Keycloak during `verify`. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>

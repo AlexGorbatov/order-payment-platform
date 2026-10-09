@@ -58,7 +58,12 @@ class OpenApiLocalIT extends AbstractApiIT {
         assertThat(paths.path("/api/v1/orders/{id}").has("get")).isTrue();
         assertThat(paths.path("/api/v1/orders/{id}/cancel").has("post")).isTrue();
         assertThat(paths.path("/api/v1/orders/{id}/refund").has("post")).isTrue();
-        assertThat(paths.size()).as("nothing else is documented").isEqualTo(5);
+        // "Both services" in §11: the dead-letter API of the messaging starter
+        assertThat(paths.path("/admin/dead-letters").has("get")).isTrue();
+        assertThat(paths.path("/admin/dead-letters/{id}").has("get")).isTrue();
+        assertThat(paths.path("/admin/dead-letters/{id}/replay").has("post")).isTrue();
+        assertThat(paths.path("/admin/dead-letters/{id}/resolve").has("post")).isTrue();
+        assertThat(paths.size()).as("nothing else is documented").isEqualTo(9);
         assertThat(paths.propertyNames().stream().filter(p -> p.contains("actuator")))
                 .isEmpty();
     }

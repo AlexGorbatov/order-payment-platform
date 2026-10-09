@@ -4,6 +4,9 @@ import com.altronixsoft.opp.order.application.OrderConcurrentlyModifiedException
 import com.altronixsoft.opp.order.application.OrderPage;
 import com.altronixsoft.opp.order.application.OrderRepository;
 import com.altronixsoft.opp.order.domain.Order;
+import java.time.Instant;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -11,6 +14,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -60,6 +64,17 @@ class JpaOrderRepository implements OrderRepository {
                 page,
                 size,
                 result.getTotalElements());
+    }
+
+    /** The locks only mean something inside the caller's transaction, so one is required. */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public List<Order> lockOverduePendingPayment(Instant placedBefore, int limit) {
+        List<UUID> ids = orders.lockOverduePendingPaymentIds(placedBefore, limit);
+        return orders.findAllById(ids).stream()
+                .map(OrderMapper::toDomain)
+                .sorted(Comparator.comparing(Order::createdAt).thenComparing(Order::id))
+                .toList();
     }
 
     @Override

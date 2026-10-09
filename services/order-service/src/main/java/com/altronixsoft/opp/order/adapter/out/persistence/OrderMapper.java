@@ -40,6 +40,7 @@ final class OrderMapper {
                 Money.of(entity.totalMinor, entity.currency),
                 entity.status,
                 entity.cancelReason,
+                entity.refundRequestId,
                 entity.disputed,
                 entity.createdAt,
                 entity.updatedAt,
@@ -76,12 +77,13 @@ final class OrderMapper {
     }
 
     /**
-     * Copies what can change after creation — status, cancel reason, dispute flag, update time — onto a loaded entity,
+     * Copies what can change after creation — status, cancel reason, refund request, dispute flag, update time — onto a loaded entity,
      * and appends the history entries it does not have yet. Lines never change and the history is append-only.
      */
     static void applyChanges(Order order, OrderEntity entity) {
         entity.status = order.status();
         entity.cancelReason = order.cancelReason();
+        entity.refundRequestId = order.refundRequestId();
         entity.disputed = order.disputed();
         entity.updatedAt = order.updatedAt();
         List<StatusChange> history = order.history();

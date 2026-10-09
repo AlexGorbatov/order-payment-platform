@@ -1,6 +1,8 @@
 package com.altronixsoft.opp.order.application;
 
 import com.altronixsoft.opp.order.domain.Order;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -23,4 +25,13 @@ public interface OrderRepository {
      * @throws OrderConcurrentlyModifiedException the order was changed by someone else since it was loaded
      */
     Order save(Order order);
+
+    /**
+     * Claims up to {@code limit} orders that are {@code PENDING_PAYMENT} and were placed before {@code placedBefore},
+     * oldest first, and locks them until the caller's transaction ends. Orders another transaction has locked are
+     * skipped ({@code FOR UPDATE SKIP LOCKED}), so concurrent callers get disjoint batches.
+     *
+     * @throws org.springframework.transaction.IllegalTransactionStateException without an active transaction
+     */
+    List<Order> lockOverduePendingPayment(Instant placedBefore, int limit);
 }

@@ -14,22 +14,26 @@ import org.springframework.transaction.annotation.Transactional;
  * {@code REFUND_REQUESTED}; the money moves later, when payment-service has processed the request.
  *
  * <p>The refund request id is generated here and travels in the {@code RefundRequested} event, so every retry of a
- * failed refund is a new request with its own id (architecture §5.3).
+ * failed refund is a new request with its own id (architecture §5.3). {@code OrderRefundRequested} goes to the outbox in
+ * the same transaction.
  */
 @Service
 public class RefundOrderService {
 
     private final OrderRepository orders;
+    private final OrderEventPublisher events;
     private final IdGenerator ids;
     private final Clock clock;
 
-    public RefundOrderService(OrderRepository orders, IdGenerator ids, Clock clock) {
+    public RefundOrderService(OrderRepository orders, OrderEventPublisher events, IdGenerator ids, Clock clock) {
         this.orders = orders;
+        this.events = events;
         this.ids = ids;
         this.clock = clock;
     }
 
     /**
+     * @param correlationId the business flow the refund belongs to; its event carries it
      * @return the stored order
      * @throws OperationNotPermittedException the caller is not an administrator
      * @throws OrderNotFoundException there is no such order
@@ -38,13 +42,15 @@ public class RefundOrderService {
      * @throws OrderConcurrentlyModifiedException the order changed while the refund was being requested
      */
     @Transactional
-    public Order refund(UUID id, Caller caller) {
+    public Order refund(UUID id, Caller caller, UUID correlationId) {
         if (!caller.admin()) {
             throw new OperationNotPermittedException("Only an administrator can refund an order");
         }
         Order order = orders.findById(id).orElseThrow(() -> new OrderNotFoundException(id));
         order.requestRefund(
                 RefundReason.ADMIN, ids.newId(), Trigger.api(clock.instant().truncatedTo(ChronoUnit.MICROS)));
-        return orders.save(order);
+        Order stored = orders.save(order);
+        events.publish(order.pullDomainEvents(), correlationId);
+        return stored;
     }
 }

@@ -112,6 +112,7 @@ final class StripePaymentGateway implements PaymentGateway {
                     .setAmount(request.amount().amountMinor())
                     .putMetadata("refundId", request.refundId().toString())
                     .putMetadata("paymentId", request.paymentId().toString())
+                    .putMetadata("orderId", request.orderId().toString())
                     .build();
             return client.v1().refunds().create(params, options(IdempotencyKeys.refund(request.refundId())));
         });

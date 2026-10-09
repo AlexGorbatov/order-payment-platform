@@ -36,7 +36,8 @@ import tools.jackson.databind.json.JsonMapper;
  * <p>The initiation worker is not scheduled: a test runs {@link PaymentInitiationJob#run()} itself and moves the
  * {@link MutableClock} to make retries due, which makes every scenario deterministic. The SDK does not retry on its own
  * ({@code stripe.max-network-retries=0}), so one run is one call to Stripe; the circuit breaker is out of the way. The
- * webhook processor is not scheduled either: a test runs {@link WebhookProcessorJob#run()}.
+ * webhook processor and the cancellation and refund workers are not scheduled either: a test runs them
+ * ({@link WebhookProcessorJob#run()} and the like).
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -46,6 +47,8 @@ import tools.jackson.databind.json.JsonMapper;
             "payment.initiation.retry-base-delay=10s",
             "payment.initiation.lease=5m",
             "payment.webhook-processor.enabled=false",
+            "payment.cancellation.enabled=false",
+            "payment.refund.enabled=false",
             "payment.webhook-processor.retry-jitter=0",
             "payment.webhook-processor.retry-base-delay=10s",
             "payment.webhook-processor.retry-max-attempts=3",

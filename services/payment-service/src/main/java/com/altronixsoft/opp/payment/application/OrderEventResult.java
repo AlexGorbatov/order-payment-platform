@@ -17,5 +17,7 @@ public enum OrderEventResult {
     /** A refund was created, due for the refund worker. */
     REFUND_REQUESTED,
     /** The refund request was handled before (F22); nothing changed. */
-    REFUND_ALREADY_REQUESTED
+    REFUND_ALREADY_REQUESTED,
+    /** The payment cannot be refunded (not paid, or already refunded): a FAILED refund and PaymentRefundFailed. */
+    REFUND_FAILED
 }

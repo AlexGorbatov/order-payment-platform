@@ -86,9 +86,37 @@ class FakeGateway implements PaymentGateway {
         return intent(request.paymentIntentId(), "canceled");
     }
 
+    /** Each {@code createRefund} takes the next scripted step; the last one repeats. Default: a pending refund. */
+    final List<CreateRefundRequest> refunded = new ArrayList<>();
+
+    final List<Boolean> refundedInsideTransaction = new ArrayList<>();
+    private final Deque<Supplier<GatewayRefund>> refundScript = new ArrayDeque<>();
+    private Supplier<GatewayRefund> lastRefund = () -> refund("re_default", "pending", null);
+
+    static GatewayRefund refund(String id, String status, String failureReason) {
+        return new GatewayRefund(
+                id, status, Money.of(3097, "EUR"), "pi_3Test", Instant.parse("2026-10-09T12:00:00Z"), failureReason);
+    }
+
+    FakeGateway thenRefund(GatewayRefund refund) {
+        refundScript.add(() -> refund);
+        return this;
+    }
+
+    FakeGateway thenRefuseRefund(PaymentGatewayException failure) {
+        refundScript.add(() -> {
+            throw failure;
+        });
+        return this;
+    }
+
     @Override
     public GatewayRefund createRefund(CreateRefundRequest request) {
-        throw new UnsupportedOperationException();
+        refunded.add(request);
+        refundedInsideTransaction.add(transactions.isOpen());
+        Supplier<GatewayRefund> step = refundScript.isEmpty() ? lastRefund : refundScript.poll();
+        lastRefund = step;
+        return step.get();
     }
 
     @Override

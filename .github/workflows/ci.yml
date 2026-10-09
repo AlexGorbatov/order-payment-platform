@@ -110,3 +110,43 @@ jobs:
         run: |
           docker build -f infra/Dockerfile --target order-service -t opp/order-service:ci .
           docker build -f infra/Dockerfile --target payment-service -t opp/payment-service:ci .
+
+  # Publishes the coverage number for the README badge: the JaCoCo reports of `build`, reduced to a shields.io endpoint
+  # file on the `badges` branch (kept apart from the code). Only for pushes to main, and the only job that may write.
+  badges:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download the coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          name: jacoco-reports
+          path: reports
+
+      - name: Compute the badge
+        run: .github/scripts/coverage-badge.sh reports > coverage.json
+
+      - name: Publish it on the badges branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir badges && cd badges
+          git init -q -b badges
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth=1 origin badges && git reset -q --hard FETCH_HEAD || true
+          cp ../coverage.json coverage.json
+          git add coverage.json
+          if git diff --cached --quiet; then
+            echo "badge unchanged"
+          else
+            git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -q -m "Update coverage badge for ${GITHUB_SHA::7}"
+            git push -q origin badges
+          fi

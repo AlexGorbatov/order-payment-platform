@@ -1,7 +1,8 @@
 # ADR-0006: Multi-layer idempotency
 
 - Status: Accepted
-- Date: 2026-10-08 (HTTP layer details added with T06)
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
+- Date: 2026-10-08 (HTTP layer details added with the HTTP implementation)
 - Related: architecture §7.3, §8.2, §10, §11, §15 (F04, F05, F09, F16, F17, F21, F22), ADR-0013
 
 ## Context
@@ -18,7 +19,7 @@ Apply idempotency explicitly at each boundary:
 |---|---|---|
 | Client → API | `Idempotency-Key` header + request hash, stored in `idempotency_record` (24 h) | (principal, key) |
 | Service → Stripe | Stripe `Idempotency-Key` derived from local IDs | `pi-create:{paymentId}`, `pi-cancel:{paymentId}`, `refund:{refundId}` |
-| Stripe → webhook | `stripe_webhook_event` primary key (30 days) | `evt_...` |
+| Stripe → webhook | `stripe_webhook_event` primary key (until manual purge; 30-day target) | `evt_...` |
 | Kafka → consumer | Inbox (ADR-0005) | (group, eventId) |
 | Relay → Kafka | Idempotent producer | producer id / sequence |
 | Business | State machine + optimistic locking (`@Version`) | aggregate version |
@@ -26,7 +27,7 @@ Apply idempotency explicitly at each boundary:
 HTTP semantics: same key and hash ⇒ stored response replayed (`Idempotent-Replayed: true`); same key, different hash
 ⇒ 422; still in progress ⇒ 409 with `Retry-After`; a 5xx removes the record so the client may retry.
 
-Stripe keys expire after 24 h, so a payment still `CREATED` after 23 h becomes `INITIATION_FAILED` instead of being
+Stripe can prune keys once they are at least 24 h old, so a payment still `CREATED` after 23 h becomes `INITIATION_FAILED` instead of being
 retried with a fresh key that could create a second PaymentIntent.
 
 ## Alternatives considered
@@ -123,9 +124,7 @@ handling. Problem types are URNs.
 - **Remaining window.** The business transaction commits *before* the response is recorded. A crash between the two
   leaves an `IN_PROGRESS` record that is taken over after the timeout, and the retry executes the business method
   again. Closing this completely would mean writing the record inside the business transaction, which couples the
-  starter to every service's persistence. The business layer is the second line of defence by design: unique
-  constraints (one payment per order), the order state machine and the idempotent outbox/inbox make a repeated
-  execution harmless rather than impossible.
+  starter to every service's persistence. Business constraints protect existing payments and refunds, but do not close this window for order placement: `PlaceOrderService` allocates a new order id on every execution. A retry after abandonment can therefore create another order. F16 proves concurrent-request deduplication, not crash-safe HTTP order creation; see the follow-up in [backlog](../backlog.md#http-idempotency-business-commit-and-response-recording).
 - Idempotency applies to the success path of the whole HTTP exchange, not to side effects inside the controller; those
   use their own keys (Stripe `Idempotency-Key`, inbox, ADR-0004/0005).
 

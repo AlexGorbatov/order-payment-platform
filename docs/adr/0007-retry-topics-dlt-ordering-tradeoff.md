@@ -1,7 +1,8 @@
 # ADR-0007: Retry topics + DLT + persisted dead letters; ordering trade-off
 
 - Status: Accepted
-- Date: 2026-10-08 (implementation details added with T05)
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
+- Date: 2026-10-08 (implementation details added with the consumer implementation)
 - Related: architecture §7.2, §7.4, §7.5, §10, §11, §15 (F03, F15), ADR-0005, ADR-0006
 
 ## Context
@@ -32,7 +33,7 @@ operators need to inspect and replay failed messages.
   accepted because consumers are order-tolerant: the inbox deduplicates and state machines are monotonic, so a late
   event is either still valid or ignored.
 - Additional topics per source topic (retry and DLT, 14 days retention).
-- Replay goes through the outbox, so it inherits the same delivery guarantees and tracing.
+- Replay goes through the outbox, so it inherits its delivery guarantees and correlation headers; trace export is deferred (architecture §13).
 
 ## Why giving up per-key ordering on the retry path is acceptable
 
@@ -44,16 +45,13 @@ of one order can be inverted — but only on the **failure path**: the normal pa
 This is acceptable because every consumer is built to be order-tolerant, with two independent mechanisms:
 
 1. **Inbox (ADR-0005)** — an event is applied at most once, however many times and by whichever path it arrives, so a
-   delayed copy can never double-apply.
+   delayed copy within inbox retention cannot double-apply; older replay requires business-state checks.
 2. **Monotonic state machines (ADR-0006, architecture §5)** — an event is applied only if the transition is still
    allowed from the current state; otherwise it is recorded as stale and ignored. Examples from this system:
-   - `OrderCancelled` overtakes a retried `OrderCreated` in payment-service: the cancel is remembered
-     (`payment.cancel_requested`), and when `OrderCreated` finally arrives the payment is created already marked for
-     cancellation instead of being charged;
+   - `OrderCancelled` overtakes a retried `OrderCreated` in payment-service: `ApplyOrderEventService` throws retryable `PaymentNotFoundException`. The cancellation is retried until the payment exists, then cancels it locally or queues the Stripe cancellation. No placeholder is stored; exhausted retries go to DLT for operator recovery;
    - a delayed `PaymentActionRequired` reaches order-service after `PaymentSucceeded`: the order is already `PAID`, the
      transition is not allowed, the event is ignored;
-   - `PaymentRefunded` before `PaymentSucceeded` cannot happen across the saga (a refund is only requested for a paid
-     order), and Stripe webhooks are already treated as unordered (§8.3).
+   - a duplicate `PaymentSucceeded` is ignored once an order has entered refund handling. Refund outcomes for an older `refundRequestId` are ignored; unexplained outcomes go directly to DLT. Stripe webhooks are also treated as unordered (§8.3).
 
 A consumer that cannot tolerate reordering must not rely on retry topics for that event type: throw
 `NonRetryableEventException` (straight to the DLT) or keep its handling idempotent and commutative.
@@ -123,3 +121,12 @@ DLT topics are named from the source topic, and the infrastructure script pre-cr
   their role check.
 - Operational steps: `docs/runbooks/dlq.md`.
 
+
+## Addendum: which dead letters a service stores
+
+The persister subscribes to the pattern `platform.dead-letters.persister.topic-pattern`, default `.*-dlt`. Both services share
+one broker, so with the default each service stored the dead letters of the other one's consumer, which contradicts the
+rule above (a dead letter lives in the service that consumed the record) and let an operator replay an event from the
+wrong service. The end-to-end poison-message scenario found it. Each service now sets the pattern to the dead-letter topic of
+the topic it consumes (`payment.events.v1-dlt` in order-service, `order.events.v1-dlt` in payment-service). The default
+stays as it is; deriving it from the service's own listeners is in the backlog.

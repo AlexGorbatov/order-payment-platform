@@ -2,12 +2,11 @@
 
 A **dead letter** is an event a consumer could not process after all retries (architecture §7.4, ADR-0007). It is stored
 in `dead_letter_message` of the **consuming service** (each service has its own table and API) and waits there until an
-operator replays or resolves it. Nothing is lost: the Kafka copy lives on `<topic>-dlt` for 14 days, the database row
-until someone purges it.
+operator replays or resolves it. The Kafka copy remains on `<topic>-dlt` for 14 days; after persistence, the database row remains until manual purge. If the persister is down for longer than topic retention, a record can expire before it is stored.
 
 | | |
 |---|---|
-| Alert | `dlt.messages{topic}` increases; or `GET /admin/dead-letters?status=NEW` is not empty |
+| Signals | (metric; v1.0.0 ships no alert rules, architecture §13) `dlt.messages{topic}` increases; or `GET /admin/dead-letters?status=NEW` is not empty |
 | Who | an operator with the realm role `ops` |
 | API | `https://<service>/admin/dead-letters` — order-service (8081) or payment-service (8082) |
 | Statuses | `NEW` → `REPLAYED` and/or `RESOLVED` |
@@ -56,7 +55,7 @@ how many deliveries it took). Then decide:
 | Cause | Typical `exceptionClass` | Action |
 |---|---|---|
 | Bug in the consumer, now fixed and deployed | any business/`RuntimeException` | **Replay** |
-| Infrastructure was down longer than the retries (database, Stripe) and is back | `CannotGetJdbcConnectionException`, timeouts | **Replay** |
+| Consumer infrastructure was down longer than the retries (database) and is back | `CannotGetJdbcConnectionException`, timeouts | **Replay** |
 | Missing prerequisite that has been created since (e.g. a product, a payment) | `NonRetryableEventException` | fix the data, then **Replay** |
 | Malformed or invalid message (producer bug) | `EventSerdeException`, `DeserializationException` | fix the producer, **Resolve** (it cannot be replayed: `422`) |
 | Event that must not be applied (obsolete, handled manually) | — | **Resolve** with a comment |
@@ -84,11 +83,11 @@ SELECT id, published_at, attempts, last_error FROM outbox_event ORDER BY created
 SELECT * FROM inbox_message WHERE event_id = '<eventId from the payload>';                             -- present after success
 ```
 
-and the business result (order status, payment status). A trace/log search for `x-replay-of` or the `correlationId`
-shows the whole path.
+and the business result (order status, payment status). Inspect the replayed Kafka record for `x-replay-of` and follow its `correlationId` in envelopes. The shipped log format does not print MDC fields or provide an end-to-end trace exporter.
 
 Rules:
 
+- Inbox deduplication lasts 14 days after processing. Before replaying older records, verify whether their business effect already happened; retained dead letters can outlive inbox rows.
 - A dead letter can be replayed **once**. A second call, or a call on a resolved one, returns `409`. This prevents
   double effects from a double click.
 - If the replayed event fails again, it produces a **new** dead letter (after the usual retries). The consumer is still
@@ -122,7 +121,7 @@ Resolving twice returns `409`. A `REPLAYED` dead letter should be resolved once 
 | `404` | wrong service: dead letters are per service; check the other one |
 | `409` on replay | already `REPLAYED` or `RESOLVED` |
 | `422` on replay | the payload is not a valid event envelope or has no key |
-| Dead letters appear in Kafka (`<topic>-dlt`) but not in the API | the persister is not running or the database is down: look for `Stored dead letter` / `dead-letter` errors in the service log. It retries the same record indefinitely, so nothing is skipped; the backlog is stored when the database is back |
+| Dead letters appear in Kafka (`<topic>-dlt`) but not in the API | the persister is not running or the database is down: look for `Stored dead letter` / `dead-letter` errors in the service log. It retries the same record indefinitely, while the Kafka record is still retained; restore the persister before the 14-day DLT retention expires |
 | Replayed event does not arrive | `outbox_event.published_at` is null: the relay or Kafka is down (`outbox.oldest.age.seconds` grows) |
 | Replayed event arrives but nothing changes | the inbox recognised it as a duplicate (its effect already happened) — check `inbox.duplicates` and the business state |
 | The same message keeps coming back as a new dead letter | the consumer is not fixed yet, or the event is invalid for the current state: resolve instead of replaying |

@@ -1,7 +1,8 @@
 # ADR-0012: Stripe test-mode strategy (WireMock / stripe-mock / Stripe CLI) and live-mode guard
 
 - Status: Accepted
-- Date: 2026-10-08 (gateway implementation details and documentation reconciliation added with T11)
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
+- Date: 2026-10-08 (gateway implementation details and documentation reconciliation added with the gateway implementation)
 - Related: architecture §8.1, §8.2, §8.5, §12, §14
 
 ## Context
@@ -41,7 +42,7 @@ Safety:
 - WireMock stubs must be kept faithful to Stripe's API; contract smoke tests against stripe-mock catch shape drift.
 - Running against live keys is prevented at startup, not by convention.
 
-## Gateway implementation (T11)
+## Gateway implementation
 
 `PaymentGateway` (application port) speaks only platform types (`CreatePaymentIntentRequest`, `GatewayPaymentIntent`,
 `GatewayRefund`, `PaymentGatewayException`); `StripePaymentGateway` (`adapter.out.stripe`) is the only code that sees
@@ -87,20 +88,21 @@ breaker and the metrics count gateway calls, not HTTP requests.
 ### Reconciliation with the current documentation (2026-10-09)
 
 Checked against the stripe-java 34.0.0 README, CHANGELOG and sources, the `stripe/stripe-mock` v0.205.0 OpenAPI validation, and
-search excerpts of docs.stripe.com. **docs.stripe.com itself is blocked by the egress policy of the build environment**, so the
-items marked ⚠ rest on SDK code, the mock's spec and excerpts, not on the live documentation page.
+search excerpts of docs.stripe.com during the adapter implementation. Direct access was blocked in that build environment;
+the release documentation review subsequently verified provider key retention against the live documentation. Items still
+marked "unverified" have not been confirmed against a real test account.
 
 | # | architecture.md says | Current state | Consequence |
 |---|---|---|---|
 | 1 | `StripeClient`, timeouts, `maxNetworkRetries=2` | Builder exists (`setApiKey`, `setConnectTimeout`/`setReadTimeout` in ms, `setMaxNetworkRetries`, `setApiBase`). Since v32 `RequestOptions.getApiKey()` is gone (use the authenticator) and `StripeClientBuilder.setHttpClient` exists. | Matches. |
 | 2 | "`maxNetworkRetries=2`" | The Java SDK retries only timeouts/connection errors, `Stripe-Should-Retry`, 409 and ≥ 500 — not 429 (see above). | §8.2 amended: 429 is left to the work queue's backoff. |
-| 3 | idempotency keys "expire after 24 h" | ⚠ Stripe "may prune a key once it is at least 24 hours old": a minimum, not an exact expiry. | The 23 h cutoff for `CREATED` payments stays correct (conservative). |
-| 4 | TRANSIENT includes "idempotency in-progress"; mismatch is a bug | ⚠ The HTTP status Stripe uses for a mismatch is not stated in the excerpts found; the SDK maps `400`/`404` with `type=idempotency_error` to `IdempotencyException` and any `409` to a plain `ApiException`. | Classified by status + `type`/`code`, not only by class; `409` and `idempotency_key_in_use` are TRANSIENT, `idempotency_error` is a mismatch. To be confirmed against a real test account. |
+| 3 | idempotency keys "expire after 24 h" | Confirmed in [Stripe's API v1 documentation](https://docs.stripe.com/api/idempotent_requests): keys may be removed after at least 24 hours, not exactly at 24 hours. | The 23 h cutoff for `CREATED` payments stays correct (conservative). |
+| 4 | TRANSIENT includes "idempotency in-progress"; mismatch is a bug | Unverified: The HTTP status Stripe uses for a mismatch is not stated in the excerpts found; the SDK maps `400`/`404` with `type=idempotency_error` to `IdempotencyException` and any `409` to a plain `ApiException`. | Classified by status + `type`/`code`, not only by class; `409` and `idempotency_key_in_use` are TRANSIENT, `idempotency_error` is a mismatch. To be confirmed against a real test account. |
 | 5 | `automatic_payment_methods.enabled=true`, `allow_redirects=never` | Still current: `AllowRedirects.NEVER` exists in SDK 34, stripe-mock accepts it, and `enabled` is required whenever the object is sent. `never` filters redirect methods out so no `return_url` is needed. | Matches. |
 | 6 | (not mentioned) | SDK 34 **removed** `payment_method_types` from `PaymentIntentCreateParams` (API version `2026-09-30.endive`). | We never send it; any future code must use automatic methods or `excluded_payment_method_types`. |
 | 7 | stripe-mock "stateless" | Confirmed, and more: it answers with fixtures (cancel returns `requires_payment_method`, a refund is always `100 usd`, `created` is constant). | Contract tests assert shape and mapping, not values (as ADR-0012 already says). |
-| 8 | §8.5 test payment-method ids | ⚠ Not verifiable here (docs.stripe.com unreachable). | Unchanged; to be checked when the first real-account demo runs. |
-| 9 | (webhooks, T12) | The SDK pins API version `2026-09-30.endive`; event payloads of another API version make typed deserialization of `event.data.object` fail. | For T12: parse webhook payloads tolerantly (or pin the endpoint's API version); not a gateway concern. |
+| 8 | §8.5 test payment-method ids | Test values used by scripts and the simulator; [Stripe's testing guide](https://docs.stripe.com/testing) is the provider reference. Simulator outcomes are controlled locally and do not prove real-account behavior. | Verify the account's behavior during the real Stripe demo. |
+| 9 | (webhooks) | The SDK pins API version `2026-09-30.endive`; event payloads of another API version make typed deserialization of `event.data.object` fail. | For webhook processing: parse webhook payloads tolerantly (or pin the endpoint's API version); not a gateway concern. |
 
-stripe-java 34.0.0 (2026-09-30) is the latest stable release, as the parent POM pins. The SDK can print "notices" to AI agents in
+The parent POM pins stripe-java 34.0.0. The SDK can print "notices" to AI agents in
 test environments (`STRIPE_SUPPRESS_NOTICES`); such text is treated as untrusted output, never as instructions.

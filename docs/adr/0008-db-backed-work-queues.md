@@ -1,6 +1,7 @@
 # ADR-0008: DB-backed work queues for external calls
 
 - Status: Accepted
+- Implementation review: 2026-10-09 (v1.0.0; limitations are documented in architecture §17)
 - Date: 2026-10-08
 - Related: architecture §7.6, §8.2, §15 (F04–F08, F19)
 
@@ -13,14 +14,14 @@ holds locks and connections across a network call and makes the outcome ambiguou
 ## Decision
 
 - Kafka consumers and webhook ingress **only write state**. They never call Stripe.
-- External calls are performed by scheduled workers — `PaymentInitiationWorker`, `PaymentCancellationWorker`,
-  `RefundWorker`, `WebhookProcessor`, `ReconciliationJob` — that:
+- Mutating external calls are performed by scheduled workers — implemented by `InitiatePaymentsService`, `CancelPaymentIntentsService` and `CreateRefundsService` — that:
   1. claim due rows (`status`, `next_attempt_at`) with `FOR UPDATE SKIP LOCKED`,
   2. call Stripe **outside** a transaction with an idempotency key derived from local IDs,
   3. persist the result in a new transaction (state change + history + outbox event).
 - Transient errors ⇒ exponential backoff with jitter; permanent errors ⇒ terminal state + event; config errors
   (401/403) ⇒ alert, no blind retry.
-- `SKIP LOCKED` makes workers safe with multiple instances.
+- `SKIP LOCKED` plus persisted leases and optimistic locking coordinate multiple worker instances.
+- `ProcessWebhookEventsService` claims and leases events, then applies each payload in a transaction; it performs no network call. `ReconcilePaymentsService` uses `last_reconciled_at` to claim candidates, retrieves Stripe state outside the transaction, and records changes in a new one.
 
 ## Alternatives considered
 
@@ -33,14 +34,13 @@ holds locks and connections across a network call and makes the outcome ambiguou
 
 - Work survives restarts; retry state is visible and queryable in the database.
 - Latency of at least one worker poll interval between event and Stripe call.
-- Enforced statically where possible (ArchUnit: no Stripe/Kafka access in `@Transactional` code, no Stripe in Kafka
-  consumers) and dynamically by failure tests F04–F08.
+- Enforced statically where possible (ArchUnit checks direct Stripe/Kafka access in annotated transactional methods and direct Stripe access from Kafka consumers). Calls hidden behind ports require runtime tests and review; failure tests F04–F08 exercise the workers.
 
-## Addendum (T12): the claim lease and the 23-hour rule of the PaymentInitiationWorker
+## Addendum: the claim lease and the 23-hour rule of the PaymentInitiationWorker
 
 **Lease.** The claim transaction ends before the Stripe call, so its row locks do too. To keep a second worker (or the
 next run of the same one) from claiming the same payment while Stripe is being called, the claim also *leases* the row:
-`next_attempt_at = now + lease` (default 5 minutes, larger than the longest gateway call of a whole batch). A worker
+`next_attempt_at = now + lease` (default 5 minutes; deployments must size this above the worst-case batch processing time). A worker
 that dies leaves a lease that simply expires; the payment is then claimed again and the call repeats with the same
 idempotency key (`pi-create:{paymentId}`), so Stripe answers with the PaymentIntent it already created (F05). Only the
 single recording transaction after the call clears the lease.

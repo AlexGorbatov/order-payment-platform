@@ -47,14 +47,32 @@ class PlaceOrderServiceTest {
             }
 
             @Override
+            public OrderPage findPage(int page, int size) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public OrderPage findPageByCustomer(String customerId, int page, int size) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
             public Order save(Order order) {
                 stored.put(order.id(), order);
                 return order;
             }
         };
-        ProductCatalog products = skus -> {
-            catalogQueries.add(List.copyOf(skus));
-            return skus.stream().map(catalog::get).filter(p -> p != null).toList();
+        ProductCatalog products = new ProductCatalog() {
+            @Override
+            public List<Product> findBySkus(Collection<String> skus) {
+                catalogQueries.add(List.copyOf(skus));
+                return skus.stream().map(catalog::get).filter(p -> p != null).toList();
+            }
+
+            @Override
+            public List<Product> findActive() {
+                throw new UnsupportedOperationException();
+            }
         };
         service = new PlaceOrderService(repository, products, () -> ORDER_ID, Clock.fixed(NOW, ZoneOffset.UTC));
     }

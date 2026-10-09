@@ -1,11 +1,15 @@
 package com.altronixsoft.opp.order.adapter.out.persistence;
 
 import com.altronixsoft.opp.order.application.OrderConcurrentlyModifiedException;
+import com.altronixsoft.opp.order.application.OrderPage;
 import com.altronixsoft.opp.order.application.OrderRepository;
 import com.altronixsoft.opp.order.domain.Order;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +35,31 @@ class JpaOrderRepository implements OrderRepository {
     @Transactional(readOnly = true)
     public Optional<Order> findById(UUID id) {
         return orders.findById(id).map(OrderMapper::toDomain);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OrderPage findPage(int page, int size) {
+        return toPage(orders.findAll(pageRequest(page, size)), page, size);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OrderPage findPageByCustomer(String customerId, int page, int size) {
+        return toPage(orders.findByCustomerId(customerId, pageRequest(page, size)), page, size);
+    }
+
+    /** Newest first; the id breaks ties so that paging through orders created in the same instant is stable. */
+    private static PageRequest pageRequest(int page, int size) {
+        return PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
+    }
+
+    private static OrderPage toPage(Page<OrderEntity> result, int page, int size) {
+        return new OrderPage(
+                result.getContent().stream().map(OrderMapper::toDomain).toList(),
+                page,
+                size,
+                result.getTotalElements());
     }
 
     @Override

@@ -9,6 +9,12 @@ public interface OrderRepository {
 
     Optional<Order> findById(UUID id);
 
+    /** All orders, newest first ({@code createdAt} descending, then id descending), {@code page} counted from 0. */
+    OrderPage findPage(int page, int size);
+
+    /** The orders of one customer, newest first. */
+    OrderPage findPageByCustomer(String customerId, int page, int size);
+
     /**
      * Stores a new order or the changes of a loaded one, including its new status-history entries.
      *

@@ -113,6 +113,22 @@ Access tokens live 15 minutes. Example payload for `customer1`:
 }
 ```
 
+## Calling order-service
+
+```bash
+export TOKEN=$(./scripts/token.sh customer1)
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8081/api/v1/products | jq
+curl -s -X POST localhost:8081/api/v1/orders -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" -H 'Content-Type: application/json' \
+  -d '{"items":[{"sku":"MUG-JAVA","quantity":2}]}' | jq
+```
+
+Every state-changing call needs an `Idempotency-Key`; prices are never sent. Run the service with
+`SPRING_PROFILES_ACTIVE=local` to get the OpenAPI document (http://localhost:8081/v3/api-docs) and Swagger UI
+(http://localhost:8081/swagger-ui.html, "Authorize" takes the token from `token.sh`); in any other profile both are
+switched off. The service validates tokens against `KEYCLOAK_ISSUER_URI` (default `http://localhost:8180/realms/opp`)
+and fetches keys from `KEYCLOAK_JWK_SET_URI` (default: the issuer's `/protocol/openid-connect/certs`).
+
 ## Kafka topics
 
 Broker auto-creation is disabled (`auto.create.topics.enable=false`). `kafka-init` creates `order.events.v1` and

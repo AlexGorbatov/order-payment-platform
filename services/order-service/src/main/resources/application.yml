@@ -39,6 +39,13 @@ opp:
   security:
     audience: order-service
 
+platform:
+  dead-letters:
+    persister:
+      # Dead letters of the topic this service consumes, and only those: both services share the broker, and the starter's
+      # default (.*-dlt) would store the other service's dead letters in this database as well (architecture §7.4).
+      topic-pattern: 'payment\.events\.v1-dlt'
+
 order:
   # PENDING_PAYMENT longer than this -> CANCELLED(TIMEOUT) + OrderCancelled (architecture §6.4)
   payment-timeout: PT30M

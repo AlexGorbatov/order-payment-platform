@@ -1,0 +1,17 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: payment-service
+  datasource:
+    url: ${PAYMENTS_DB_URL:jdbc:postgresql://localhost:5432/payments_db}
+    username: ${PAYMENTS_DB_USER:payments}
+    password: ${PAYMENTS_DB_PASSWORD:payments}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    # service migrations first, then the ones the platform starters ship (V1000+)
+    locations: classpath:db/migration,classpath:db/migration/platform

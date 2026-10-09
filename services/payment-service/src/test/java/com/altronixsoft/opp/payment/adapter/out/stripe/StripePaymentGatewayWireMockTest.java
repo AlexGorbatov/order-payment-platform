@@ -26,8 +26,8 @@ import com.altronixsoft.opp.payment.application.GatewayRefund;
 import com.altronixsoft.opp.payment.application.PaymentGateway;
 import com.altronixsoft.opp.payment.application.PaymentGatewayException;
 import com.altronixsoft.opp.payment.domain.Money;
+import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.http.Fault;
-import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
@@ -45,7 +45,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.slf4j.LoggerFactory;
@@ -62,10 +61,12 @@ class StripePaymentGatewayWireMockTest {
     private static final UUID ORDER_ID = UUID.fromString("0199e0a0-2222-7000-8000-000000000002");
     private static final UUID REFUND_ID = UUID.fromString("0199e0a0-3333-7000-8000-000000000003");
 
-    @RegisterExtension
-    static WireMockExtension stripe = WireMockExtension.newInstance()
-            .options(wireMockConfig().dynamicPort())
-            .build();
+    /**
+     * A fresh server on a fresh port for every test. A shared one lets the JDK reuse a keep-alive connection that an
+     * earlier test left broken (a read timeout, an injected fault); the JDK then silently re-sends the POST, and a test
+     * that counts requests sees one the SDK never made.
+     */
+    private WireMockServer stripe;
 
     private SimpleMeterRegistry meters;
     private ListAppender<ILoggingEvent> logs;
@@ -73,7 +74,8 @@ class StripePaymentGatewayWireMockTest {
 
     @BeforeEach
     void captureLogs() {
-        stripe.resetAll();
+        stripe = new WireMockServer(wireMockConfig().dynamicPort());
+        stripe.start();
         meters = new SimpleMeterRegistry();
         gatewayLogger = (Logger) LoggerFactory.getLogger(StripePaymentGateway.class);
         gatewayLogger.setLevel(Level.DEBUG);
@@ -84,6 +86,7 @@ class StripePaymentGatewayWireMockTest {
 
     @AfterEach
     void releaseLogs() {
+        stripe.stop();
         gatewayLogger.detachAppender(logs);
     }
 

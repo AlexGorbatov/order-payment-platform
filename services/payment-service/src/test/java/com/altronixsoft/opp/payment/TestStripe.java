@@ -99,6 +99,16 @@ final class TestStripe {
                 paymentIntent(paymentIntentId, status, amount, currency)));
     }
 
+    /** Like {@link #stubRetrieve}, answering only after {@code delay}: a slow Stripe while something else happens. */
+    static void stubRetrieveSlowly(String paymentIntentId, String status, java.time.Duration delay) {
+        SERVER.stubFor(get(urlPathEqualTo("/v1/payment_intents/" + paymentIntentId))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/json")
+                        .withFixedDelay((int) delay.toMillis())
+                        .withBody(paymentIntent(paymentIntentId, status, 3097, "EUR"))));
+    }
+
     static void stubRetrieveFailing(int status) {
         SERVER.stubFor(json(
                 get(urlPathMatching("/v1/payment_intents/.+")),

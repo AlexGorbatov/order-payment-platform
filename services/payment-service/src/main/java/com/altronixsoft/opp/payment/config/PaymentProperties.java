@@ -13,13 +13,35 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param webhookProcessor the WebhookProcessor
  * @param cancellation the PaymentCancellationWorker
  * @param refund the RefundWorker
+ * @param reconciliation the ReconciliationJob
  */
 @ConfigurationProperties("payment")
 record PaymentProperties(
         @DefaultValue Initiation initiation,
         @DefaultValue WebhookProcessor webhookProcessor,
         @DefaultValue Worker cancellation,
-        @DefaultValue Worker refund) {
+        @DefaultValue Worker refund,
+        @DefaultValue Reconciliation reconciliation) {
+
+    /**
+     * Reconciliation with Stripe (architecture §8.4, ADR-0010).
+     *
+     * @param enabled whether the scheduled job runs; the manual trigger works either way
+     * @param interval delay between the end of one run and the start of the next
+     * @param initialDelay delay before the first run
+     * @param staleAfter a payment unchanged (and unchecked) for this long is checked
+     * @param batchSize payments checked per run at most
+     * @param rateLimitPerSecond Stripe calls per second the job may make
+     * @param rateLimitMaxWait how long the job waits for a permit before it leaves the rest for the next run
+     */
+    record Reconciliation(
+            @DefaultValue("true") boolean enabled,
+            @DefaultValue("5m") Duration interval,
+            @DefaultValue("1m") Duration initialDelay,
+            @DefaultValue("10m") Duration staleAfter,
+            @DefaultValue("200") int batchSize,
+            @DefaultValue("5") int rateLimitPerSecond,
+            @DefaultValue("5s") Duration rateLimitMaxWait) {}
 
     /**
      * Creates the PaymentIntent of payments waiting in {@code CREATED} (architecture §6.1, ADR-0008).

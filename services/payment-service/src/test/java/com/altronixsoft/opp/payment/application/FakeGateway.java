@@ -6,6 +6,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -72,9 +73,19 @@ class FakeGateway implements PaymentGateway {
         return step.get();
     }
 
+    /** What {@code retrievePaymentIntent} answers; unset: unsupported. Calls are recorded. */
+    Function<String, GatewayPaymentIntent> retrieve = id -> {
+        throw new UnsupportedOperationException();
+    };
+
+    final List<String> retrievedIds = new ArrayList<>();
+    final List<Boolean> retrievedInsideTransaction = new ArrayList<>();
+
     @Override
     public GatewayPaymentIntent retrievePaymentIntent(String paymentIntentId) {
-        throw new UnsupportedOperationException();
+        retrievedIds.add(paymentIntentId);
+        retrievedInsideTransaction.add(transactions.isOpen());
+        return retrieve.apply(paymentIntentId);
     }
 
     @Override

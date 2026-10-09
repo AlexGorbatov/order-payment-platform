@@ -8,6 +8,7 @@ import java.time.Clock;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -20,31 +21,35 @@ import org.springframework.transaction.annotation.Transactional;
  * always the server's, and the {@link Order} aggregate enforces the limits (1–20 lines, quantity 1–10, one currency,
  * no duplicate SKU). The order is stored in status {@code PENDING_PAYMENT}.
  *
- * <p>Publishing {@code OrderCreated} is not done here yet: the aggregate has registered its domain event, and handing it
- * to the outbox in this same transaction is the next step (T09).
+ * <p>{@code OrderCreated} goes to the outbox in the transaction that stores the order (architecture §7.1), keyed by the
+ * order id; payment-service creates the payment from it.
  */
 @Service
 public class PlaceOrderService {
 
     private final OrderRepository orders;
+    private final OrderEventPublisher events;
     private final ProductCatalog catalog;
     private final IdGenerator ids;
     private final Clock clock;
 
-    public PlaceOrderService(OrderRepository orders, ProductCatalog catalog, IdGenerator ids, Clock clock) {
+    public PlaceOrderService(
+            OrderRepository orders, OrderEventPublisher events, ProductCatalog catalog, IdGenerator ids, Clock clock) {
         this.orders = orders;
+        this.events = events;
         this.catalog = catalog;
         this.ids = ids;
         this.clock = clock;
     }
 
     /**
+     * @param correlationId the business flow this order starts; its events carry it
      * @return the stored order
      * @throws com.altronixsoft.opp.order.domain.InvalidOrderException a limit is exceeded or a line is invalid
      * @throws ProductNotAvailableException a SKU is unknown or inactive
      */
     @Transactional
-    public Order place(PlaceOrderCommand command) {
+    public Order place(PlaceOrderCommand command, UUID correlationId) {
         Order.requireLineCount(command.lines().size());
 
         List<String> skus = command.lines().stream()
@@ -69,6 +74,9 @@ public class PlaceOrderService {
                 .toList();
         // The database stores microseconds; truncate here so a stored order equals the one that was placed.
         Trigger trigger = Trigger.api(clock.instant().truncatedTo(ChronoUnit.MICROS));
-        return orders.save(Order.place(ids.newId(), command.customerId(), items, trigger));
+        Order order = Order.place(ids.newId(), command.customerId(), items, trigger);
+        Order stored = orders.save(order);
+        events.publish(order.pullDomainEvents(), correlationId);
+        return stored;
     }
 }

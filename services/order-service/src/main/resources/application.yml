@@ -21,6 +21,8 @@ spring:
       accept-float-as-int: false
     mapper:
       allow-coercion-of-scalars: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
   flyway:
     # service migrations first, then the ones the platform starters ship (V1000+)
     locations: classpath:db/migration,classpath:db/migration/platform
@@ -36,6 +38,10 @@ spring:
 opp:
   security:
     audience: order-service
+
+order:
+  # PENDING_PAYMENT longer than this -> CANCELLED(TIMEOUT) + OrderCancelled (architecture §6.4)
+  payment-timeout: PT30M
 
 management:
   endpoints:

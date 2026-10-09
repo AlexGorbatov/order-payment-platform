@@ -127,7 +127,10 @@ Every state-changing call needs an `Idempotency-Key`; prices are never sent. Run
 `SPRING_PROFILES_ACTIVE=local` to get the OpenAPI document (http://localhost:8081/v3/api-docs) and Swagger UI
 (http://localhost:8081/swagger-ui.html, "Authorize" takes the token from `token.sh`); in any other profile both are
 switched off. The service validates tokens against `KEYCLOAK_ISSUER_URI` (default `http://localhost:8180/realms/opp`)
-and fetches keys from `KEYCLOAK_JWK_SET_URI` (default: the issuer's `/protocol/openid-connect/certs`).
+and fetches keys from `KEYCLOAK_JWK_SET_URI` (default: the issuer's `/protocol/openid-connect/certs`). It publishes
+order events and consumes payment events through `KAFKA_BOOTSTRAP_SERVERS` (default `localhost:9092`); an order that is
+not paid within `order.payment-timeout` (3 minutes in the `local` profile, 30 by default) is cancelled. Pass
+`X-Correlation-Id: <uuid>` to follow one flow through the logs and events; the response echoes it.
 
 ## Kafka topics
 

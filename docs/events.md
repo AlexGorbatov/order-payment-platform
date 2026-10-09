@@ -116,6 +116,9 @@ A refund of a paid order was requested.
 
 Producer: payment-service · consumer: order-service · aggregate: `Payment`
 
+How order-service reacts to each of these events — including which ones are no-ops for an order that has moved on and
+which ones are dead-lettered — is specified in architecture §6.7.
+
 ### PaymentInitiated
 
 A PaymentIntent was created at the provider.

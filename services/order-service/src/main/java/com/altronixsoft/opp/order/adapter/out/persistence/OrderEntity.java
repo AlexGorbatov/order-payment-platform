@@ -42,6 +42,9 @@ class OrderEntity {
     @Column(name = "cancel_reason")
     CancelReason cancelReason;
 
+    @Column(name = "refund_request_id")
+    UUID refundRequestId;
+
     @Column(nullable = false)
     boolean disputed;
 

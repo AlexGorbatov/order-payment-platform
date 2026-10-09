@@ -24,6 +24,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -31,10 +32,21 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The whole service on a random port, with a real PostgreSQL and a real Keycloak, called over HTTP with real tokens.
- * Subclasses share one application context.
+ * The whole service on a random port, with a real PostgreSQL, Kafka and Keycloak, called over HTTP with real tokens.
+ * Subclasses share one application context. The clock is a {@link MutableClock}; the payment timeout job is never
+ * scheduled during a test (tests run it), and the outbox relay and the retries are fast.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {
+            "order.payment-timeout-job.initial-delay=1h",
+            "platform.outbox.relay.initial-delay=0s",
+            "platform.outbox.relay.fixed-delay=100ms",
+            "platform.consumer.retry.blocking-interval=100ms",
+            "platform.consumer.retry.topic-delays=200ms,400ms,800ms",
+            "platform.dead-letters.persister.metadata-refresh=1s"
+        })
+@Import(TestClockConfiguration.class)
 abstract class AbstractApiIT {
 
     static final JsonMapper JSON = JsonMapper.builder().build();
@@ -56,17 +68,23 @@ abstract class AbstractApiIT {
     @Autowired
     PlaceOrderService placeOrder;
 
+    @Autowired
+    MutableClock clock;
+
     @DynamicPropertySource
     static void infrastructure(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", TestDatabase.POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", TestDatabase.POSTGRES::getUsername);
         registry.add("spring.datasource.password", TestDatabase.POSTGRES::getPassword);
         registry.add("spring.security.oauth2.resourceserver.jwt.issuer-uri", TestKeycloak::issuer);
+        registry.add("spring.kafka.bootstrap-servers", TestKafka::bootstrapServers);
     }
 
     @BeforeEach
     void cleanDatabase() {
-        jdbc.sql("TRUNCATE order_status_history, order_item, orders, idempotency_record")
+        clock.reset();
+        jdbc.sql("TRUNCATE order_status_history, order_item, orders, idempotency_record, outbox_event, inbox_message, "
+                        + "dead_letter_message")
                 .update();
     }
 
@@ -152,11 +170,13 @@ abstract class AbstractApiIT {
     /** An order of {@code customerId}: 2 × MUG-JAVA + 1 × STICKERS-PACK = 3097 EUR cents, pending payment. */
     UUID seedOrder(String customerId) {
         return placeOrder
-                .place(new PlaceOrderCommand(
-                        customerId,
-                        List.of(
-                                new PlaceOrderCommand.Line("MUG-JAVA", 2),
-                                new PlaceOrderCommand.Line("STICKERS-PACK", 1))))
+                .place(
+                        new PlaceOrderCommand(
+                                customerId,
+                                List.of(
+                                        new PlaceOrderCommand.Line("MUG-JAVA", 2),
+                                        new PlaceOrderCommand.Line("STICKERS-PACK", 1))),
+                        UUID.randomUUID())
                 .id();
     }
 

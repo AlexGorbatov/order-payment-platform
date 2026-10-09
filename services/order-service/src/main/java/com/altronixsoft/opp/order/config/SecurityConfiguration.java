@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -34,11 +35,14 @@ import org.springframework.security.web.SecurityFilterChain;
  *   <li>Which role may call what is decided here, per endpoint, so the whole matrix is in one place; which orders a
  *       caller may see is decided by the use cases.
  *   <li>Actuator: {@code health} and {@code info} are public, every other endpoint needs role {@code ops}.
+ *   <li>{@code /admin/**} (the dead-letter API of the messaging starter) needs role {@code ops}; the starter's own
+ *       {@code @PreAuthorize} checks it again, which needs method security.
  *   <li>OpenAPI documents are reachable without a token only when {@code springdoc.api-docs.enabled=true}, which only
  *       the {@code local} profile sets.
  * </ul>
  */
 @Configuration(proxyBeanMethods = false)
+@EnableMethodSecurity
 @EnableConfigurationProperties(OrderSecurityProperties.class)
 class SecurityConfiguration {
 
@@ -81,6 +85,7 @@ class SecurityConfiguration {
                     requests.requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info")
                             .permitAll();
                     requests.requestMatchers("/actuator/**").hasRole("OPS");
+                    requests.requestMatchers("/admin/**").hasRole("OPS");
                     if (apiDocsEnabled) {
                         requests.requestMatchers(
                                         "/v3/api-docs",

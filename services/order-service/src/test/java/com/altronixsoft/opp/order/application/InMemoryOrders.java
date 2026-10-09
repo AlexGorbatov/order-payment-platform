@@ -1,6 +1,8 @@
 package com.altronixsoft.opp.order.application;
 
 import com.altronixsoft.opp.order.domain.Order;
+import com.altronixsoft.opp.order.domain.OrderStatus;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -43,6 +45,17 @@ final class InMemoryOrders implements OrderRepository {
         saves++;
         stored.put(order.id(), order);
         return order;
+    }
+
+    /** Like the database: pending orders placed before the cutoff, oldest first; nothing is locked in memory. */
+    @Override
+    public List<Order> lockOverduePendingPayment(Instant placedBefore, int limit) {
+        return stored.values().stream()
+                .filter(o -> o.status() == OrderStatus.PENDING_PAYMENT
+                        && o.createdAt().isBefore(placedBefore))
+                .sorted(Comparator.comparing(Order::createdAt).thenComparing(Order::id))
+                .limit(limit)
+                .toList();
     }
 
     private static OrderPage page(List<Order> all, int page, int size) {

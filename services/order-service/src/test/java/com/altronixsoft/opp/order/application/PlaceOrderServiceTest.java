@@ -26,6 +26,10 @@ import org.junit.jupiter.api.Test;
 
 class PlaceOrderServiceTest {
 
+    private static final UUID CORRELATION_ID = UUID.fromString("0199e0a0-3333-7000-8000-000000000003");
+
+    private final RecordingEventPublisher events = new RecordingEventPublisher();
+
     private static final UUID ORDER_ID = UUID.fromString("0199e0a0-1111-7000-8000-000000000001");
     private static final Instant NOW = Instant.parse("2026-10-08T12:00:00.123456789Z");
 
@@ -61,6 +65,11 @@ class PlaceOrderServiceTest {
                 stored.put(order.id(), order);
                 return order;
             }
+
+            @Override
+            public List<Order> lockOverduePendingPayment(Instant placedBefore, int limit) {
+                throw new UnsupportedOperationException();
+            }
         };
         ProductCatalog products = new ProductCatalog() {
             @Override
@@ -74,7 +83,7 @@ class PlaceOrderServiceTest {
                 throw new UnsupportedOperationException();
             }
         };
-        service = new PlaceOrderService(repository, products, () -> ORDER_ID, Clock.fixed(NOW, ZoneOffset.UTC));
+        service = new PlaceOrderService(repository, events, products, () -> ORDER_ID, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private void add(String sku, String name, long price, String currency, boolean active) {
@@ -88,7 +97,8 @@ class PlaceOrderServiceTest {
     @Test
     void placesAnOrderWithCatalogNamesAndPrices() {
         Order order = service.place(
-                command(new PlaceOrderCommand.Line("MUG-JAVA", 2), new PlaceOrderCommand.Line("STICKERS-PACK", 1)));
+                command(new PlaceOrderCommand.Line("MUG-JAVA", 2), new PlaceOrderCommand.Line("STICKERS-PACK", 1)),
+                CORRELATION_ID);
 
         assertThat(order.id()).isEqualTo(ORDER_ID);
         assertThat(order.customerId()).isEqualTo("customer-1");
@@ -104,29 +114,32 @@ class PlaceOrderServiceTest {
 
     @Test
     void theTimestampIsTruncatedToMicrosecondsLikeTheDatabaseStoresIt() {
-        Order order = service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 1)));
+        Order order = service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 1)), CORRELATION_ID);
 
         assertThat(order.createdAt()).isEqualTo(Instant.parse("2026-10-08T12:00:00.123456Z"));
         assertThat(order.history().getFirst().source()).isEqualTo(TransitionSource.API);
     }
 
     @Test
-    void theAggregateKeepsItsPlacedEventForTheOutbox() {
-        Order order = service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 3)));
+    void thePlacedEventGoesToThePublisherWithTheCorrelationId() {
+        Order order = service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 3)), CORRELATION_ID);
 
-        assertThat(order.pullDomainEvents())
+        assertThat(order.pullDomainEvents()).isEmpty();
+        assertThat(events.published)
                 .singleElement()
-                .isInstanceOfSatisfying(OrderDomainEvent.Placed.class, placed -> {
-                    assertThat(placed.customerId()).isEqualTo("customer-1");
-                    assertThat(placed.total()).isEqualTo(Money.of(3 * 1299, "EUR"));
-                    assertThat(placed.itemCount()).isEqualTo(1);
-                });
+                .satisfies(published -> assertThat(published.correlationId()).isEqualTo(CORRELATION_ID));
+        assertThat(events.events()).singleElement().isInstanceOfSatisfying(OrderDomainEvent.Placed.class, placed -> {
+            assertThat(placed.customerId()).isEqualTo("customer-1");
+            assertThat(placed.total()).isEqualTo(Money.of(3 * 1299, "EUR"));
+            assertThat(placed.itemCount()).isEqualTo(1);
+        });
     }
 
     @Test
     void theCatalogIsAskedOnceForTheDistinctSkus() {
         service.place(
-                command(new PlaceOrderCommand.Line("MUG-JAVA", 1), new PlaceOrderCommand.Line("STICKERS-PACK", 1)));
+                command(new PlaceOrderCommand.Line("MUG-JAVA", 1), new PlaceOrderCommand.Line("STICKERS-PACK", 1)),
+                CORRELATION_ID);
 
         assertThat(catalogQueries).hasSize(1);
         assertThat(catalogQueries.getFirst()).containsExactlyInAnyOrder("MUG-JAVA", "STICKERS-PACK");
@@ -134,10 +147,12 @@ class PlaceOrderServiceTest {
 
     @Test
     void unknownAndInactiveProductsAreReportedTogetherAndSorted() {
-        assertThatThrownBy(() -> service.place(command(
-                        new PlaceOrderCommand.Line("NOPE", 1),
-                        new PlaceOrderCommand.Line("MUG-JAVA", 1),
-                        new PlaceOrderCommand.Line("OLD-MOUSE", 1))))
+        assertThatThrownBy(() -> service.place(
+                        command(
+                                new PlaceOrderCommand.Line("NOPE", 1),
+                                new PlaceOrderCommand.Line("MUG-JAVA", 1),
+                                new PlaceOrderCommand.Line("OLD-MOUSE", 1)),
+                        CORRELATION_ID))
                 .isInstanceOfSatisfying(ProductNotAvailableException.class, e -> {
                     assertThat(e.skus()).containsExactly("NOPE", "OLD-MOUSE");
                     assertThat(e).hasMessageContaining("NOPE").hasMessageContaining("OLD-MOUSE");
@@ -147,11 +162,12 @@ class PlaceOrderServiceTest {
 
     @Test
     void tooFewOrTooManyLinesAreRejectedBeforeTheCatalogIsAsked() {
-        assertThatThrownBy(() -> service.place(command())).isInstanceOf(InvalidOrderException.class);
+        assertThatThrownBy(() -> service.place(command(), CORRELATION_ID)).isInstanceOf(InvalidOrderException.class);
         PlaceOrderCommand.Line[] twentyOne = IntStream.rangeClosed(1, 21)
                 .mapToObj(i -> new PlaceOrderCommand.Line("SKU-" + i, 1))
                 .toArray(PlaceOrderCommand.Line[]::new);
-        assertThatThrownBy(() -> service.place(command(twentyOne))).isInstanceOf(InvalidOrderException.class);
+        assertThatThrownBy(() -> service.place(command(twentyOne), CORRELATION_ID))
+                .isInstanceOf(InvalidOrderException.class);
 
         assertThat(catalogQueries).isEmpty();
         assertThat(stored).isEmpty();
@@ -159,9 +175,9 @@ class PlaceOrderServiceTest {
 
     @Test
     void quantitiesOutsideOneToTenAreRejected() {
-        assertThatThrownBy(() -> service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 0))))
+        assertThatThrownBy(() -> service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 0)), CORRELATION_ID))
                 .isInstanceOf(InvalidOrderException.class);
-        assertThatThrownBy(() -> service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 11))))
+        assertThatThrownBy(() -> service.place(command(new PlaceOrderCommand.Line("MUG-JAVA", 11)), CORRELATION_ID))
                 .isInstanceOf(InvalidOrderException.class);
         assertThat(stored).isEmpty();
     }
@@ -169,7 +185,8 @@ class PlaceOrderServiceTest {
     @Test
     void theSameSkuTwiceIsRejected() {
         assertThatThrownBy(() -> service.place(
-                        command(new PlaceOrderCommand.Line("MUG-JAVA", 1), new PlaceOrderCommand.Line("MUG-JAVA", 2))))
+                        command(new PlaceOrderCommand.Line("MUG-JAVA", 1), new PlaceOrderCommand.Line("MUG-JAVA", 2)),
+                        CORRELATION_ID))
                 .isInstanceOf(InvalidOrderException.class)
                 .hasMessageContaining("MUG-JAVA");
         assertThat(stored).isEmpty();
@@ -177,8 +194,11 @@ class PlaceOrderServiceTest {
 
     @Test
     void mixedCurrenciesAreRejected() {
-        assertThatThrownBy(() -> service.place(command(
-                        new PlaceOrderCommand.Line("MUG-JAVA", 1), new PlaceOrderCommand.Line("DOLLAR-ITEM", 1))))
+        assertThatThrownBy(() -> service.place(
+                        command(
+                                new PlaceOrderCommand.Line("MUG-JAVA", 1),
+                                new PlaceOrderCommand.Line("DOLLAR-ITEM", 1)),
+                        CORRELATION_ID))
                 .isInstanceOf(InvalidOrderException.class)
                 .hasMessageContaining("one currency");
         assertThat(stored).isEmpty();
@@ -186,8 +206,8 @@ class PlaceOrderServiceTest {
 
     @Test
     void aBlankCustomerIsRejected() {
-        assertThatThrownBy(() ->
-                        service.place(new PlaceOrderCommand(" ", List.of(new PlaceOrderCommand.Line("MUG-JAVA", 1)))))
+        assertThatThrownBy(() -> service.place(
+                        new PlaceOrderCommand(" ", List.of(new PlaceOrderCommand.Line("MUG-JAVA", 1))), CORRELATION_ID))
                 .isInstanceOf(InvalidOrderException.class);
         assertThat(stored).isEmpty();
     }

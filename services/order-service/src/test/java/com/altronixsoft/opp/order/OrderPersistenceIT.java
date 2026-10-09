@@ -57,6 +57,7 @@ class OrderPersistenceIT {
         registry.add("spring.datasource.url", TestDatabase.POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", TestDatabase.POSTGRES::getUsername);
         registry.add("spring.datasource.password", TestDatabase.POSTGRES::getPassword);
+        registry.add("spring.kafka.bootstrap-servers", TestKafka::bootstrapServers);
     }
 
     @BeforeEach
@@ -69,7 +70,7 @@ class OrderPersistenceIT {
     }
 
     private Order place(String customer, PlaceOrderCommand.Line... lines) {
-        return placeOrder.place(new PlaceOrderCommand(customer, List.of(lines)));
+        return placeOrder.place(new PlaceOrderCommand(customer, List.of(lines)), UUID.randomUUID());
     }
 
     private Order placeDefault() {

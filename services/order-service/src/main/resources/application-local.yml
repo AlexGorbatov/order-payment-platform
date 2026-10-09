@@ -1,4 +1,8 @@
-# Local development: expose the OpenAPI document (/v3/api-docs) and Swagger UI (/swagger-ui.html).
+# Local development: a short payment window, and the OpenAPI document (/v3/api-docs) and Swagger UI
+# (/swagger-ui.html).
+order:
+  payment-timeout: PT3M
+
 springdoc:
   api-docs:
     enabled: true

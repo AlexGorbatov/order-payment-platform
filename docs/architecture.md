@@ -77,7 +77,7 @@ scripts                              token.sh, ops-token.sh, send-test-webhook.s
 docs                                 architecture.md, events.md, adr/, runbooks/, testing.md, demo.md
 ```
 
-Hexagonal layout per service: `domain`, `application`, `adapter.in.{web,kafka,webhook}`, `adapter.out.{persistence,stripe,messaging}`, `config`. Starters are Spring Boot auto-configurations; they ship their own Flyway migrations under `db/migration/platform` (versions `V1000+`).
+Hexagonal layout per service: `domain`, `application`, `adapter.in.{web,kafka,webhook,job}`, `adapter.out.{persistence,stripe,messaging}`, `config`. `adapter.in.job` holds scheduled triggers of use cases (e.g. `PaymentTimeoutJob`); the schedule itself is wired in `config`. Starters are Spring Boot auto-configurations; they ship their own Flyway migrations under `db/migration/platform` (versions `V1000+`).
 
 ## 5. Domain Model
 
@@ -204,6 +204,8 @@ sequenceDiagram
 
 Payment in `CREATED` (no PI yet) is cancelled locally without a Stripe call.
 
+**Payment timeout (order-service).** `PaymentTimeoutJob` runs with a fixed delay and cancels orders that have been `PENDING_PAYMENT` for longer than `order.payment-timeout` (default `PT30M`, `PT3M` in the `local` profile) with reason `TIMEOUT`. It claims the oldest overdue orders in batches with `FOR UPDATE SKIP LOCKED` (partial index on `orders(created_at) WHERE status = 'PENDING_PAYMENT'`), one transaction per batch, so several instances never cancel the same order. Every `OrderCancelled` of one run carries the run's `correlationId`. A payment that succeeds after the timeout is compensated exactly like a customer cancellation (F18).
+
 ### 6.5 Refund
 
 Admin `POST /orders/{id}/refund` (or auto-compensation) → `REFUND_REQUESTED` + `OrderRefundRequested{refundRequestId}` → payment-service creates `Refund(REQUESTED)` → worker calls Stripe (`refund:{refundId}`) → `PENDING` → webhook → `SUCCEEDED` (Payment `REFUNDED`, `PaymentRefunded` → order `REFUNDED`) or `FAILED` (`PaymentRefundFailed` → order `REFUND_FAILED`, admin may retry with a new `refundRequestId`).
@@ -226,6 +228,24 @@ flowchart LR
   H -- error --> F[FAILED, backoff] --> P
   F -- max attempts --> DEAD[DEAD + alert]
 ```
+
+### 6.7 Order-side handling of payment events
+
+order-service consumes `payment.events.v1` as group `order-service`; every event runs once per `eventId` inside the inbox transaction (§7.2). Events arrive at least once and, through the retry topics, not always in order (§7.4), so each rule checks the order's status first. Anything a duplicate or a race explains is a no-op (`IGNORED`, logged and counted); anything else is a `NonRetryableEventException` and goes straight to the DLT (F15).
+
+| Event | Applied when the order is | Effect | No-op when | DLT when |
+|---|---|---|---|---|
+| `PaymentSucceeded` | `PENDING_PAYMENT` | → `PAID` | already `PAID` / `REFUND_*` (duplicate) | — |
+| `PaymentSucceeded` | `CANCELLED` | → `REFUND_REQUESTED(LATE_PAYMENT_AFTER_CANCEL)` + `OrderRefundRequested` (F18) | — | — |
+| `PaymentInitiationFailed` | `PENDING_PAYMENT` | → `CANCELLED(PAYMENT_INITIATION_FAILED)` + `OrderCancelled` | any other status | — |
+| `PaymentCanceled` | `PENDING_PAYMENT` | → `CANCELLED(PAYMENT_CANCELED)` + `OrderCancelled` | any other status (usually the echo of a customer/timeout cancel) | — |
+| `PaymentAttemptFailed`, `PaymentActionRequired` | `PENDING_PAYMENT` | history entry only; the customer may retry on the same PaymentIntent (§6.2, §6.3) | any other status | — |
+| `PaymentRefunded` | `REFUND_REQUESTED`, same `refundRequestId` | → `REFUNDED` | already `REFUNDED`; outcome of an older `refundRequestId` | no refund ever requested; contradicts the order (`REFUND_FAILED`) |
+| `PaymentRefundFailed` | `REFUND_REQUESTED`, same `refundRequestId` | → `REFUND_FAILED` | already `REFUND_FAILED`; outcome of an older `refundRequestId` | no refund ever requested; contradicts the order (`REFUNDED`) |
+| `PaymentDisputed` | any status | `disputed = true` | already disputed | — |
+| any | — | — | — | unknown `orderId` |
+
+`PaymentInitiated` needs no reaction; unknown event types are skipped (§9.3). The order remembers its latest `refundRequestId`, so the outcome of a refund that an administrator has already retried cannot overwrite the newer request. Status changes caused by an event record its `eventId` in `order_status_history.source_event_id`; events published in response carry the consumed event's `correlationId`, and its `eventId` as `causationId`. Metric: `order.payment.events{type, outcome=APPLIED|COMPENSATED|IGNORED|DUPLICATE|REJECTED}`.
 
 ## 7. Reliability Patterns
 
@@ -315,6 +335,8 @@ Used by the test-support confirm endpoint and the demo (verify IDs against docs.
 }
 ```
 
+`correlationId` starts at the edge: the `X-Correlation-Id` request header when it is a UUID, otherwise a new one (echoed in the response); consumers pass the consumed event's id on, and a scheduled job uses one id per run. `causationId` is the consumed event that caused the change; it is absent for API calls and jobs.
+
 Kafka headers: `eventType`, `eventVersion`, `correlationId`, `traceparent`. Versioning: additive changes keep the version; breaking changes introduce a new version, published in parallel during migration. JSON Schemas live in `libs/event-contracts` — ADR-0011.
 
 ### 9.3 Events
@@ -346,7 +368,7 @@ Unknown event types are skipped (forward compatibility), not dead-lettered.
 
 **orders_db**
 - `product(sku PK, name, price_minor, currency, active)` + seed.
-- `orders(id, customer_id, status, currency, total_minor, cancel_reason, disputed, created_at, updated_at, version)`.
+- `orders(id, customer_id, status, currency, total_minor, cancel_reason, refund_request_id, disputed, created_at, updated_at, version)` — `refund_request_id` is the latest refund request (stale refund outcomes are recognised by it, §6.7); partial index on `created_at WHERE status = 'PENDING_PAYMENT'` for the payment timeout.
 - `order_item(id, order_id FK, sku, name, quantity, unit_price_minor, line_total_minor)`.
 - `order_status_history(id, order_id, from_status, to_status, reason, source, source_event_id, occurred_at)`.
 
@@ -422,7 +444,7 @@ Retention: outbox 7 d (published), inbox 14 d, webhook events 30 d, idempotency 
 
 - **Tracing:** Micrometer Tracing + OpenTelemetry (OTLP → collector → Jaeger). `traceparent` is captured into outbox headers at write time and restored by the relay, so one trace spans HTTP → outbox → Kafka → consumer → Stripe call. Webhook processing starts a trace tagged with `stripe.event_id`, `stripe.event_type`, `payment.id`, `order.id`.
 - **Logs:** structured JSON (ECS) with `traceId`, `spanId`, `correlationId`, `orderId`, `paymentId`.
-- **Metrics:** `outbox.pending`, `outbox.oldest.age.seconds`, `outbox.publish.{success,failure}`, `inbox.duplicates`, `idempotency.{replays,conflicts}`, `webhook.received{type}`, `webhook.signature.failures`, `webhook.processing.lag`, `webhook.stale.ignored`, `webhook.dead`, `stripe.api.latency{operation,outcome}`, `stripe.api.errors{type}`, `dlt.messages{topic}`, `reconciliation.{checked,drift}`, `payments.by.status`, `orders.by.status`.
+- **Metrics:** `outbox.pending`, `outbox.oldest.age.seconds`, `outbox.publish.{success,failure}`, `inbox.duplicates`, `idempotency.{replays,conflicts}`, `webhook.received{type}`, `webhook.signature.failures`, `webhook.processing.lag`, `webhook.stale.ignored`, `webhook.dead`, `stripe.api.latency{operation,outcome}`, `stripe.api.errors{type}`, `dlt.messages{topic}`, `reconciliation.{checked,drift}`, `order.payment.events{type,outcome}`, `payments.by.status`, `orders.by.status`.
 - Grafana dashboard "OPP Overview" and alert rules in `infra/`.
 
 ## 14. Testing Strategy
@@ -457,12 +479,12 @@ Global invariants asserted at the end of every E2E test: ≤ 1 succeeded Payment
 | F12 | Invalid signature / replayed old webhook | 400, not stored | No forged state changes |
 | F13 | `livemode=true` event | 400 + alert | Test-only system |
 | F14 | Webhook handler keeps failing | Backoff → DEAD + alert, runbook replay | No silent loss |
-| F15 | Poison Kafka message | Retry topics → DLT → persisted → replay | No consumer blockage |
+| F15 | Poison Kafka message | Retry topics → DLT → persisted → replay; an event the business state cannot explain (§6.7) skips the retries | No consumer blockage |
 | F16 | Concurrent requests with same Idempotency-Key | One executes, others 409 or replay | One order |
 | F17 | Same key, different body | 422 | No accidental reuse |
-| F18 | Payment succeeds after order cancelled | Auto refund (LATE_PAYMENT_AFTER_CANCEL) | Customer not charged for cancelled order |
+| F18 | Payment succeeds after order cancelled (by the customer or the payment timeout) | Auto refund (LATE_PAYMENT_AFTER_CANCEL) | Customer not charged for cancelled order |
 | F19 | Cancel PI races with success | `unexpected_state` not retried, success handled as F18 | No stuck state |
-| F20 | Refund fails | REFUND_FAILED, admin retry | Visible, recoverable |
+| F20 | Refund fails | REFUND_FAILED, admin retry with a new refundRequestId; a late outcome of the older request is ignored | Visible, recoverable |
 | F21 | Webhook and reconciliation update the same payment | Optimistic lock + state machine | One transition, one event |
 | F22 | Duplicate OrderRefundRequested | Unique refund_request_id | One Stripe refund |
 

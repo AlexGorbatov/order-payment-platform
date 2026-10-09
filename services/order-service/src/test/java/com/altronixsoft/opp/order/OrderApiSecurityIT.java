@@ -228,4 +228,15 @@ class OrderApiSecurityIT extends AbstractApiIT {
 
         assertThat(reply.status()).isEqualTo(401);
     }
+
+    @Test
+    void theDeadLetterApiNeedsTheOpsRole() {
+        assertThat(get("/admin/dead-letters", null).status()).isEqualTo(401);
+        assertThat(get("/admin/dead-letters", TestKeycloak.tokenOf("customer1")).status())
+                .isEqualTo(403);
+        assertThat(get("/admin/dead-letters", TestKeycloak.tokenOf("admin1")).status())
+                .isEqualTo(403);
+        assertThat(get("/admin/dead-letters", TestKeycloak.opsClientToken()).status())
+                .isEqualTo(200);
+    }
 }

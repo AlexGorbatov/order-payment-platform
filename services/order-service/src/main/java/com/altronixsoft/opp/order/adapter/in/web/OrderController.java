@@ -26,6 +26,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -109,9 +110,11 @@ class OrderController {
                                             value =
                                                     "{\"type\":\"urn:problem-type:product-not-available\",\"title\":\"Unprocessable Content\",\"status\":422,\"detail\":\"Products not available: DISCONTINUED-MOUSE\",\"instance\":\"/api/v1/orders\",\"skus\":[\"DISCONTINUED-MOUSE\"]}")))
     ResponseEntity<OrderResponse> create(
-            @Valid @RequestBody CreateOrderRequest request, Authentication authentication) {
+            @Valid @RequestBody CreateOrderRequest request,
+            Authentication authentication,
+            @RequestAttribute(CorrelationIdFilter.ATTRIBUTE) UUID correlationId) {
         OrderResponse order = OrderResponse.of(
-                placeOrder.place(request.toCommand(Callers.from(authentication).subject())));
+                placeOrder.place(request.toCommand(Callers.from(authentication).subject()), correlationId));
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}")
                 .buildAndExpand(order.id())
@@ -181,8 +184,11 @@ class OrderController {
                                     @ExampleObject(
                                             value =
                                                     "{\"type\":\"urn:problem-type:order-state-conflict\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"Order 0199e0a0-6666-7000-8000-000000000006 is PAID and cannot be cancelled\",\"instance\":\"/api/v1/orders/0199e0a0-6666-7000-8000-000000000006/cancel\",\"currentStatus\":\"PAID\"}")))
-    OrderResponse cancel(@PathVariable UUID id, Authentication authentication) {
-        return OrderResponse.of(cancelOrder.cancel(id, Callers.from(authentication)));
+    OrderResponse cancel(
+            @PathVariable UUID id,
+            Authentication authentication,
+            @RequestAttribute(CorrelationIdFilter.ATTRIBUTE) UUID correlationId) {
+        return OrderResponse.of(cancelOrder.cancel(id, Callers.from(authentication), correlationId));
     }
 
     @PostMapping("/{id}/refund")
@@ -209,7 +215,11 @@ class OrderController {
             responseCode = "409",
             description = "The order is neither PAID nor REFUND_FAILED",
             content = @Content(mediaType = PROBLEM_JSON, schema = @Schema(implementation = ProblemDetail.class)))
-    ResponseEntity<OrderResponse> refund(@PathVariable UUID id, Authentication authentication) {
-        return ResponseEntity.accepted().body(OrderResponse.of(refundOrder.refund(id, Callers.from(authentication))));
+    ResponseEntity<OrderResponse> refund(
+            @PathVariable UUID id,
+            Authentication authentication,
+            @RequestAttribute(CorrelationIdFilter.ATTRIBUTE) UUID correlationId) {
+        return ResponseEntity.accepted()
+                .body(OrderResponse.of(refundOrder.refund(id, Callers.from(authentication), correlationId)));
     }
 }

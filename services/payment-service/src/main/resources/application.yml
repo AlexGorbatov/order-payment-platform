@@ -15,3 +15,12 @@ spring:
   flyway:
     # service migrations first, then the ones the platform starters ship (V1000+)
     locations: classpath:db/migration,classpath:db/migration/platform
+
+# Stripe (architecture §8, ADR-0012). Only TEST-mode keys are accepted; the application refuses to start otherwise.
+stripe:
+  api-key: ${STRIPE_API_KEY:}
+  # stripe-mock for `local`; empty means the real Stripe API
+  api-base: ${STRIPE_API_BASE:}
+  connect-timeout: 5s
+  read-timeout: 15s
+  max-network-retries: 2

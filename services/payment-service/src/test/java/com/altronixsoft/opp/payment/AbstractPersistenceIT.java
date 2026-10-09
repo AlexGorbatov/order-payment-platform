@@ -36,6 +36,8 @@ abstract class AbstractPersistenceIT {
         registry.add("spring.datasource.url", TestDatabase.POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", TestDatabase.POSTGRES::getUsername);
         registry.add("spring.datasource.password", TestDatabase.POSTGRES::getPassword);
+        // the Stripe adapter refuses to start without a test-mode key; nothing here calls Stripe
+        registry.add("stripe.api-key", () -> "sk_test_persistence_it");
     }
 
     @BeforeEach

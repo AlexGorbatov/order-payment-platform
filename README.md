@@ -15,6 +15,48 @@ machine without a Stripe account; real Stripe test mode is optional.
 - **Built to survive failures:** duplicate requests, repeated or out-of-order webhooks, a crash or Kafka outage in the middle of
   a payment do not charge or refund twice ([architecture](docs/architecture.md)).
 
+## Architecture
+
+```mermaid
+flowchart LR
+  user(["Customer, Admin, Ops"])
+  web["Web interface<br/>Next.js :8090"]
+  kc["Keycloak<br/>realm opp"]
+  stripe["Stripe API<br/>test mode"]
+
+  subgraph os["order-service :8081"]
+    direction TB
+    oapi["REST API<br/>payment timeout job"]
+    odb[("orders_db<br/>orders, outbox, inbox")]
+    oapi --> odb
+  end
+
+  kafka{{"Kafka<br/>order.events.v1<br/>payment.events.v1<br/>retry topics, dead letters"}}
+
+  subgraph ps["payment-service :8082"]
+    direction TB
+    papi["REST API<br/>webhook endpoint"]
+    workers["Workers: initiation, cancellation,<br/>refund, webhooks, reconciliation"]
+    pdb[("payments_db<br/>payments, webhook events,<br/>outbox, inbox")]
+    papi --> pdb
+    workers --> pdb
+  end
+
+  user --> web
+  user -. "sign in" .-> kc
+  web -- "JWT" --> os
+  web -- "JWT" --> ps
+  os <-- "outbox / inbox" --> kafka
+  kafka <-- "inbox / outbox" --> ps
+  workers -- "REST, Idempotency-Key" --> stripe
+  stripe -- "signed webhooks" --> papi
+  os -. "JWKS" .-> kc
+  ps -. "JWKS" .-> kc
+```
+
+The services never call each other: an order stays `PENDING_PAYMENT` until a `PaymentSucceeded` event arrives from Kafka. Stripe
+is called only by background workers, never inside a database transaction. More in [docs/architecture.md](docs/architecture.md).
+
 ## Quickstart
 
 Needs Git, Docker with Compose v2, Bash, `curl`, `jq` and `openssl`. The first start builds the images (a few minutes).

@@ -43,7 +43,7 @@ export default function OrderPage({ params }: PageProps<"/orders/[id]">) {
         icon={<SearchX />}
         title="Order not found"
         action={
-          <Link href={back.href} className="text-sm font-medium text-accent hover:underline">
+          <Link href={back.href} className="text-sm font-medium text-accent-fg hover:underline">
             Back to {back.label.toLowerCase()}
           </Link>
         }

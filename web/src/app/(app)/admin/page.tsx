@@ -44,7 +44,7 @@ export default function AdminPage() {
     <>
       <PageHeader
         eyebrow="Back office"
-        title="Every order, as the services see it"
+        title={<>Every order, as the <span className="gradient-text">services see it</span></>}
         description="Open an order to see its journey and to refund it. Refunds are always for the full amount and finish when Stripe confirms."
       />
 
@@ -63,7 +63,7 @@ export default function AdminPage() {
               onClick={() => setStatus(filter)}
               className={cn(
                 "rounded-full border border-line px-3 py-1 text-xs font-medium text-muted transition-colors hover:text-ink",
-                status === filter && "border-accent bg-accent-soft text-accent hover:text-accent",
+                status === filter && "border-accent bg-accent-soft text-accent-fg hover:text-accent-fg",
               )}
             >
               {filter === "ALL" ? "All" : ORDER_STATUS[filter].label}

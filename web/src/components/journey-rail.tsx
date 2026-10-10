@@ -51,7 +51,7 @@ export function JourneyRail({ journey, live }: { journey: Journey; live: boolean
 
           return (
             <div key={lane.id} className="flex items-stretch gap-4">
-              <div className="w-32 shrink-0 pt-0.5">
+              <div className="sticky left-0 z-20 w-32 shrink-0 bg-surface pt-0.5 pr-2">
                 <p className="font-mono text-xs font-medium">{lane.name}</p>
                 <p className="text-[11px] leading-snug text-muted">{lane.note}</p>
               </div>

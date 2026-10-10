@@ -1,65 +1,102 @@
 @import "tailwindcss";
-@import "@fontsource-variable/bricolage-grotesque/index.css";
+@import "@fontsource-variable/manrope/index.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
 
 /*
-  Tokens. The palette is named after what the money is doing: ink for text, fog and paper for surfaces, settle (teal)
-  for money that has landed, ochre for money in flight, coral for what failed, orchid for what went back.
+  Tokens. The palette is the one of altronixsoft.vercel.app: deep navy surfaces, a cyan to blue to violet brand
+  gradient, mint for success, hairline borders at 10 % white. Money states keep their meaning: settle (mint) for money
+  that landed, flight (cyan) for money in transit, fail (coral) for what failed, refund (soft violet) for what went back.
+  The site is dark only; dark is the default here too, and the light theme is the same palette on a cool paper.
 */
 :root {
-  --bg: #f4f6f8;
+  --bg: #f3f6fb;
+  --bg-alt: #e9eef7;
   --surface: #ffffff;
-  --surface-2: #eceff3;
-  --ink: #0e1420;
-  --muted: #586275;
-  --line: #dde2e9;
-  --accent: #0f8f82;
+  --surface-2: #eef2f9;
+  --ink: #0b1428;
+  --ink-strong: #1b2740;
+  --muted: #52607a;
+  --line: #d8e0ee;
+  --label: #0b7e92;
+
+  --accent: #1a62dc;
+  --accent-fg: #1a62dc;
   --accent-ink: #ffffff;
-  --accent-soft: #dcf3ef;
+  --accent-soft: rgb(26 98 220 / 0.1);
 
-  --settle: #0f8f82;
-  --settle-soft: #dcf3ef;
-  --flight: #a86d0c;
-  --flight-soft: #fbefd6;
+  --settle: #0b8f6c;
+  --settle-soft: rgb(11 143 108 / 0.12);
+  --flight: #0a7f9a;
+  --flight-soft: rgb(10 127 154 / 0.12);
   --fail: #c63a31;
-  --fail-soft: #fbe3e1;
-  --refund: #5a49c4;
-  --refund-soft: #e8e5fa;
+  --fail-soft: rgb(198 58 49 / 0.1);
+  --refund: #6a43d8;
+  --refund-soft: rgb(106 67 216 / 0.1);
 
-  --radius: 0.75rem;
-  --shadow: 0 1px 2px rgb(14 20 32 / 0.04), 0 8px 24px -12px rgb(14 20 32 / 0.12);
+  --card-bg: #ffffff;
+  --header-bg: rgb(243 246 251 / 0.8);
+  --overlay: rgb(11 20 40 / 0.4);
+  --glow: 0 10px 28px -10px rgb(26 98 220 / 0.45);
+  --shadow: 0 1px 2px rgb(11 20 40 / 0.05), 0 10px 28px -16px rgb(11 20 40 / 0.18);
+  --page-glow:
+    radial-gradient(800px 520px at 88% -5%, rgb(139 92 246 / 0.12), transparent 68%),
+    radial-gradient(700px 480px at 0% 0%, rgb(34 214 244 / 0.12), transparent 70%);
+
+  --brand-gradient: linear-gradient(90deg, #12a5c0, #1a62dc 55%, #6a43d8);
+  --btn-from: #1a62dc;
+  --btn-to: #5a40e0;
+  --radius: 1rem;
 }
 
 .dark {
-  --bg: #0a0f16;
-  --surface: #111822;
-  --surface-2: #182130;
-  --ink: #e9eef4;
-  --muted: #94a1b4;
-  --line: #233044;
-  --accent: #34c9b6;
-  --accent-ink: #04201c;
-  --accent-soft: #0f2d2a;
+  --bg: #07101f;
+  --bg-alt: #0b1428;
+  --surface: #0f1a30;
+  --surface-2: #121f39;
+  --ink: #f7f9fc;
+  --ink-strong: #d3dae6;
+  --muted: #9aa9be;
+  --line: rgb(255 255 255 / 0.1);
+  --label: #8fdde8;
 
-  --settle: #34c9b6;
-  --settle-soft: #0f2d2a;
-  --flight: #e4a53b;
-  --flight-soft: #30240d;
+  --accent: #1a7cfb;
+  --accent-fg: #22d6f4;
+  --accent-ink: #ffffff;
+  --accent-soft: rgb(26 124 251 / 0.16);
+
+  --settle: #52d8ae;
+  --settle-soft: rgb(82 216 174 / 0.14);
+  --flight: #22d6f4;
+  --flight-soft: rgb(34 214 244 / 0.13);
   --fail: #f0766d;
-  --fail-soft: #331614;
-  --refund: #9a8cf2;
-  --refund-soft: #221d44;
+  --fail-soft: rgb(240 118 109 / 0.14);
+  --refund: #b79bfd;
+  --refund-soft: rgb(139 92 246 / 0.2);
 
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --card-bg: linear-gradient(rgb(18 31 57 / 0.86), rgb(11 21 40 / 0.86));
+  --header-bg: rgb(7 16 31 / 0.76);
+  --overlay: rgb(2 6 14 / 0.62);
+  --glow: 0 12px 34px rgb(26 124 251 / 0.24);
+  --shadow: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 18px 40px -24px rgb(0 0 0 / 0.7);
+  --page-glow:
+    radial-gradient(800px 520px at 88% -5%, rgb(143 93 211 / 0.28), transparent 68%),
+    radial-gradient(700px 480px at 0% 0%, rgb(34 214 244 / 0.1), transparent 70%);
+
+  --brand-gradient: linear-gradient(90deg, #22d6f4, #1a7cfb 55%, #8b5cf6);
 }
 
 @theme inline {
   --color-bg: var(--bg);
+  --color-bg-alt: var(--bg-alt);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-ink: var(--ink);
+  --color-ink-strong: var(--ink-strong);
   --color-muted: var(--muted);
   --color-line: var(--line);
+  --color-label: var(--label);
   --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
   --color-accent-ink: var(--accent-ink);
   --color-accent-soft: var(--accent-soft);
   --color-settle: var(--settle);
@@ -71,9 +108,9 @@
   --color-refund: var(--refund);
   --color-refund-soft: var(--refund-soft);
 
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
-  --font-display: "Bricolage Grotesque Variable", var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Manrope Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", monospace;
+  --font-display: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
 
   --radius-card: var(--radius);
   --shadow-card: var(--shadow);
@@ -90,15 +127,24 @@
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font-sans);
-    font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased;
+    position: relative;
+  }
+  /* the glow behind the page: violet top right, cyan top left, as on the site's first screen */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background: var(--page-glow);
+    pointer-events: none;
   }
   ::selection {
     background: var(--accent);
     color: var(--accent-ink);
   }
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--accent-fg);
     outline-offset: 2px;
     border-radius: 6px;
   }
@@ -107,11 +153,32 @@
 @layer utilities {
   .font-display {
     font-family: var(--font-display);
-    font-optical-sizing: auto;
-    letter-spacing: -0.02em;
+    font-weight: 800;
+    letter-spacing: -0.035em;
   }
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+  /* the brand gradient, on text */
+  .gradient-text {
+    background: var(--brand-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .card-surface {
+    background: var(--card-bg);
+  }
+  .btn-gradient {
+    background-image: linear-gradient(135deg, var(--btn-from), var(--btn-to));
+    box-shadow: var(--glow);
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--label);
   }
 }
 
@@ -134,9 +201,9 @@
 
 @layer utilities {
   .anim-fade { animation: fade-in 140ms ease-out; }
-  .anim-pop { animation: pop-in 160ms ease-out; }
-  .anim-sheet { animation: sheet-in 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
-  .anim-rise { animation: rise-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .anim-pop { animation: pop-in 160ms cubic-bezier(0.2, 0.75, 0.2, 1); }
+  .anim-sheet { animation: sheet-in 220ms cubic-bezier(0.2, 0.75, 0.2, 1); }
+  .anim-rise { animation: rise-in 280ms cubic-bezier(0.2, 0.75, 0.2, 1) both; }
 }
 
 @media (prefers-reduced-motion: reduce) {

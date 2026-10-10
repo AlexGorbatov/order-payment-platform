@@ -35,12 +35,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-dvh md:grid md:grid-cols-[15rem_1fr]">
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line bg-surface md:flex">
+      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-line bg-[var(--header-bg)] backdrop-blur-xl md:flex">
         <Link href="/" className="flex items-center gap-3 px-5 py-5">
           <LogoMark className="size-8" />
-          <span className="font-display text-[15px] font-semibold leading-tight">
+          <span className="font-display text-[15px] leading-tight">
             Orders &amp; payments
-            <span className="block font-mono text-[10px] font-normal uppercase tracking-widest text-muted">reference demo</span>
+            <span className="eyebrow block !text-[10px] !font-normal">reference demo</span>
           </span>
         </Link>
         <nav className="flex flex-col gap-1 px-3 py-2" aria-label="Main">
@@ -50,8 +50,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               href={item.href}
               aria-current={active(item.href) ? "page" : undefined}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-2 hover:text-ink",
-                active(item.href) && "bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent",
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-muted transition-colors hover:bg-ink/[0.06] hover:text-ink",
+                active(item.href) && "bg-accent-soft text-accent-fg hover:bg-accent-soft hover:text-accent-fg",
               )}
             >
               <item.icon className="size-4" />
@@ -70,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-bg/85 px-4 backdrop-blur md:px-8">
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-[var(--header-bg)] px-4 backdrop-blur-[18px] md:px-8">
           <Link href="/" className="flex items-center gap-2 md:hidden" aria-label="Home">
             <LogoMark className="size-7" />
           </Link>
@@ -80,7 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 href={item.href}
                 aria-current={active(item.href) ? "page" : undefined}
-                className={cn("rounded-md px-2.5 py-1.5 text-sm font-medium text-muted", active(item.href) && "bg-accent-soft text-accent")}
+                className={cn("rounded-md px-2.5 py-1.5 text-sm font-medium text-muted", active(item.href) && "bg-accent-soft text-accent-fg")}
               >
                 {item.label}
               </Link>
@@ -93,8 +93,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {user.isCustomer ? <CartButton /> : null}
             <ThemeToggle />
             <DropdownMenu>
-              <DropdownMenuTrigger className="flex items-center gap-2 rounded-full border border-line bg-surface py-1 pl-1 pr-3 text-sm shadow-card hover:bg-surface-2">
-                <span className="grid size-7 place-items-center rounded-full bg-accent text-xs font-semibold uppercase text-accent-ink">
+              <DropdownMenuTrigger className="flex items-center gap-2 rounded-full border border-ink/20 bg-ink/[0.04] py-1 pl-1 pr-3 text-sm font-semibold hover:bg-ink/[0.09]">
+                <span className="btn-gradient grid size-7 place-items-center rounded-full text-xs font-bold uppercase text-white !shadow-none">
                   {user.name.slice(0, 1)}
                 </span>
                 <span className="hidden sm:inline">{user.username}</span>

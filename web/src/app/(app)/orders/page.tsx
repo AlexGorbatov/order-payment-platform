@@ -18,7 +18,7 @@ export default function MyOrdersPage() {
     <>
       <PageHeader
         eyebrow="Orders"
-        title="My orders"
+        title={<>My <span className="gradient-text">orders</span></>}
         description="Newest first. Open one to see its journey through the services, to pay it, or to cancel it."
         actions={
           <Button asChild>

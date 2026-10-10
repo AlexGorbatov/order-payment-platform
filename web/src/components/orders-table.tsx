@@ -28,7 +28,7 @@ export function OrdersTable({ orders, showCustomer }: { orders: OrderSummary[]; 
             {orders.map((order) => (
               <tr key={order.id} className="group cursor-pointer transition-colors hover:bg-surface-2/50" onClick={() => router.push(`/orders/${order.id}`)}>
                 <td className="px-4 py-3">
-                  <Link href={`/orders/${order.id}`} className="font-mono text-[13px] font-medium hover:text-accent" onClick={(event) => event.stopPropagation()}>
+                  <Link href={`/orders/${order.id}`} className="font-mono text-[13px] font-medium hover:text-accent-fg" onClick={(event) => event.stopPropagation()}>
                     {shortId(order.id)}
                   </Link>
                   <div className="text-xs text-muted">{formatDateTime(order.createdAt)}</div>

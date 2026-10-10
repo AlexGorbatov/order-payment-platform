@@ -20,7 +20,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
   return (
-    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+    <ThemeProvider attribute="class" defaultTheme="dark" disableTransitionOnChange>
       <QueryClientProvider client={client}>
         {children}
         <Toaster position="bottom-right" toastOptions={{ classNames: { toast: "!rounded-lg !border !border-line !bg-surface !text-ink !shadow-card" } }} />

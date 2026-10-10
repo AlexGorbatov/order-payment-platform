@@ -23,7 +23,7 @@ export function CartButton() {
           <ShoppingBag />
           <span className="hidden sm:inline">Cart</span>
           {count > 0 ? (
-            <span className="grid min-w-5 place-items-center rounded-full bg-accent px-1.5 text-xs font-semibold text-accent-ink tabular">{count}</span>
+            <span className="grid min-w-5 place-items-center rounded-full btn-gradient px-1.5 text-xs font-bold text-white !shadow-none tabular">{count}</span>
           ) : null}
         </Button>
       </DialogTrigger>

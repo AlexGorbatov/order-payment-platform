@@ -145,7 +145,7 @@ function TestCardPayment({ order, payment }: { order: Order; payment: Payment })
             onClick={() => pay(scenario.id)}
           >
             <span className="flex items-center gap-2 text-sm font-medium">
-              <CreditCard className="size-4 text-accent" aria-hidden /> {scenario.title}
+              <CreditCard className="size-4 text-accent-fg" aria-hidden /> {scenario.title}
             </span>
             <span className="mt-0.5 block font-mono text-[10px] text-muted">{scenario.text}</span>
           </button>
@@ -165,7 +165,13 @@ function StripePayment({ order, payment }: { order: Order; payment: Payment }) {
       clientSecret: payment.clientSecret ?? "",
       appearance: {
         theme: resolvedTheme === "dark" ? ("night" as const) : ("stripe" as const),
-        variables: { colorPrimary: resolvedTheme === "dark" ? "#34c9b6" : "#0f8f82", borderRadius: "10px", fontFamily: "Geist, system-ui, sans-serif" },
+        variables: {
+          colorPrimary: "#1a7cfb",
+          colorBackground: resolvedTheme === "dark" ? "#0f1a30" : "#ffffff",
+          colorText: resolvedTheme === "dark" ? "#f7f9fc" : "#0b1428",
+          borderRadius: "12px",
+          fontFamily: "Manrope, system-ui, sans-serif",
+        },
       },
     }),
     [payment.clientSecret, resolvedTheme],

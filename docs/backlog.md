@@ -57,7 +57,7 @@ Ideas and follow-ups that are out of scope for the current task. Each entry: wha
 
 ## Refund recovery and provider idempotency retention
 
-- **What:** reconcile pending refund outcomes and define safe recovery for unresolved external mutations older than provider idempotency retention. Only initiation currently has a 23-hour retry cutoff; refund and cancellation workers have none.
+- **What:** reconcile pending refund outcomes (including a `refund.failed` that arrives after the refund was recorded as succeeded, which is ignored today and leaves order and payment `REFUNDED`) and define safe recovery for unresolved external mutations older than provider idempotency retention. Only initiation currently has a 23-hour retry cutoff; refund and cancellation workers have none.
 - **Why not now:** needs provider lookup and an explicit recovery policy before retrying an ambiguous old operation.
 - **Related:** architecture §8.4, §17; ADR-0008, ADR-0010.
 

@@ -99,9 +99,9 @@ Compose does not export `.env` variables into your shell. After `./scripts/up.sh
 
 ```bash
 ./mvnw -DskipTests -DskipITs -Djacoco.skip=true package
-SPRING_PROFILES_ACTIVE=local java -jar services/order-service/target/order-service-0.1.0-SNAPSHOT.jar
+SPRING_PROFILES_ACTIVE=local java -jar services/order-service/target/order-service-*.jar
 STRIPE_API_KEY=sk_test_localdemo STRIPE_API_BASE=http://localhost:12111 STRIPE_WEBHOOK_SECRET=whsec_local_demo \
-  SPRING_PROFILES_ACTIVE=local java -jar services/payment-service/target/payment-service-0.1.0-SNAPSHOT.jar
+  SPRING_PROFILES_ACTIVE=local java -jar services/payment-service/target/payment-service-*.jar
 ```
 
 Use the same signing secret for the webhook script (`STRIPE_WEBHOOK_SECRET=whsec_local_demo ./scripts/send-test-webhook.sh ...`).

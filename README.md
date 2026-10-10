@@ -1,7 +1,7 @@
 # Order & Payment Integration Platform
 
 [![CI](https://github.com/AlexGorbatov/order-payment-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AlexGorbatov/order-payment-platform/actions/workflows/ci.yml)
-[![Coverage gate](https://img.shields.io/badge/coverage_gate-%E2%89%A580%25-brightgreen)](docs/testing.md)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FAlexGorbatov%2Forder-payment-platform%2Fbadges%2Fcoverage.json)](docs/testing.md#ci)
 [![License: MIT](https://img.shields.io/github/license/AlexGorbatov/order-payment-platform)](LICENSE)
 
 A Java reference implementation of order and payment integration with **Stripe in test mode only**. Two Spring Boot
@@ -213,8 +213,8 @@ out-of-order handling and reconciliation, JSON events, Stripe test-mode strategy
 
 Test mode only, by design (the application refuses to start with a live key). Partial refunds, multi-currency, manual
 capture and a production deployment (Kubernetes) are out of scope. Tracing export, structured logs and dashboards are not
-included; metrics and correlation ids are available. HTTP response caching has a crash window, webhook cleanup is manual,
-and reconciliation covers unfinished PaymentIntent statuses only. The list with reasons: [architecture §17](docs/architecture.md#17-out-of-scope--future-work).
+included; metrics and correlation ids are available. The maintained list of limitations, with reasons, is in
+[architecture §17](docs/architecture.md#17-out-of-scope--future-work).
 
 ## License
 

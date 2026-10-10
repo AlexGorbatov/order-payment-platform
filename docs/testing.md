@@ -43,12 +43,11 @@ the `build` job uploads them as an artifact and `e2e` downloads them. Their loca
 
 <a id="ci"></a>
 CI (`.github/workflows/ci.yml`) has five jobs: `build` (`./mvnw verify`, coverage reports, the service jars as an artifact),
-`web` (the web interface: lint, types, unit tests, production build), `e2e` (needs `build`; the scenarios above, 25 minutes at most), `images` (the compose files are valid and the three images build) and
-`badges` (pushes to `main` only: publishes an overall coverage number to the `badges` branch). The number is the
-line coverage of everything JaCoCo measures in the libraries and services, computed by `.github/scripts/coverage-badge.sh`;
-the 80 % gate of the build applies to `domain` and `application`.
-
-The README currently displays the enforced coverage gate; the measured-coverage endpoint is not yet available.
+`web` (the web interface: lint, types, unit tests, production build), `e2e` (needs `build`; the scenarios above, 25 minutes at
+most), `images` (the compose files are valid and the three images build) and `badges` (pushes to `main` only: publishes an
+overall coverage number to the `badges` branch, which the README badge reads). The number is the line coverage of everything
+JaCoCo measures in the libraries and services, computed by `.github/scripts/coverage-badge.sh`; the 80 % gate of the build
+applies to `domain` and `application`.
 
 Logs of the two services are written to `e2e-tests/target/e2e-logs/` (appended across restarts within a run). When a
 scenario fails, the tail of both is printed with the failure, and CI uploads the directory.
@@ -121,7 +120,7 @@ platform's guarantees depend on:
   does. Events carry strictly increasing `created` seconds.
 - **A journal** of every API call (operation, order, idempotency key, whether it was a replay) for assertions.
 
-The simulator's refund-failure scenario keeps a refund pending until the test supplies its outcome. Stripe documents a different sequence for [the real `pm_card_refundFail` test method](https://docs.stripe.com/testing#refunds): an initially succeeded refund later fails. That provider sequence is not reproduced by this E2E scenario; the platform treats a failed report after an applied refund success as stale (architecture §5.3).
+The simulator's refund-failure scenario keeps a refund pending until the test supplies its outcome. Stripe documents a different sequence for [the real `pm_card_refundFail` test method](https://docs.stripe.com/testing#refunds): an initially succeeded refund later fails. That provider sequence is not reproduced by this E2E scenario; the platform ignores a `refund.failed` that arrives after the refund was recorded as succeeded, logs an ERROR and leaves the payment and order `REFUNDED` (architecture §5.3, §17), so a real Stripe test account can end in that state.
 
 ### Helpers
 
@@ -203,12 +202,6 @@ The E2E does not repeat every lower-level check. `-` means evidence is at a lowe
 | F20 | refund fails | [`CancellationAndRefundIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/CancellationAndRefundIT.java) | [`CancelAndRefundIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/CancelAndRefundIT.java) |
 | F21 | webhook and reconciliation on one payment | [`WebhookResilienceIT`](../e2e-tests/src/test/java/com/altronixsoft/opp/e2e/WebhookResilienceIT.java) (late webhook after reconciliation) | [`ReconciliationIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/ReconciliationIT.java) (lock race) |
 | F22 | duplicate `OrderRefundRequested` | (`flow_6_5` for the HTTP key) | [`CancelAndRefundIT`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/CancelAndRefundIT.java), [`ApplyOrderEventServiceTest`](../services/payment-service/src/test/java/com/altronixsoft/opp/payment/application/ApplyOrderEventServiceTest.java) |
-
-## Documentation verification
-
-The v1.0.0 documentation review on 2026-10-09 checked local file links and GitHub heading anchors across the README, changelog and `docs/`. All seven Mermaid blocks rendered in GitHub's Markdown preview: the [README diagram](https://github.com/AlexGorbatov/order-payment-platform/blob/171858a1d73aaf5c127a61171b573424d0532ad8/README.md#architecture-at-a-glance) and [six architecture diagrams](https://github.com/AlexGorbatov/order-payment-platform/blob/171858a1d73aaf5c127a61171b573424d0532ad8/docs/architecture.md). Their source blocks are unchanged from that commit.
-
-`./mvnw verify` passed with JDK 21 and Docker: 1,584 tests, zero failures, errors or skipped tests, with Spotless and JaCoCo gates passing. This run did not enable the separate E2E profile.
 
 ## Rules for new scenarios
 

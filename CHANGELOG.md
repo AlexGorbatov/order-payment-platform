@@ -4,6 +4,20 @@ All notable changes to this project are recorded here. The format follows [Keep 
 versions follow [Semantic Versioning](https://semver.org/). The event contracts are versioned separately and per event type
 ([docs/events.md](docs/events.md)).
 
+## [Unreleased]
+
+### Added
+
+- **Web interface** (`web/`, Next.js): a storefront (catalog, cart, order placement with an idempotency key per cart), "my orders" and an
+  order page with the order's journey on two lanes (one per service) and payment with Stripe test cards or the Payment Element; a back office
+  (every order, figures, filters, search, refunds); an operations console (dead letters: inspect, replay, resolve; reconciliation). Keycloak
+  sign-in with PKCE, role-based landing; the services are reached through the app's own server, so they need no CORS. Part of the `apps`
+  compose profile on port 8090; the CI `web` job runs lint, types, unit tests and a production build ([web/README.md](web/README.md)).
+
+### Changed
+
+- The demo checkout page (nginx, `demo/checkout`) is replaced by the web interface; `scripts/up.sh` removes orphaned containers.
+
 ## [1.0.0] - 2026-10-09
 
 First documented platform milestone: the services, reliability starters, automated tests and manual demo. Maven coordinates remain `0.1.0-SNAPSHOT`; this entry does not create a release artifact or a Git tag.

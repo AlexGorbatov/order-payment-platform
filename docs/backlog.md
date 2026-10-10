@@ -60,3 +60,11 @@ Ideas and follow-ups that are out of scope for the current task. Each entry: wha
 - **What:** reconcile pending refund outcomes and define safe recovery for unresolved external mutations older than provider idempotency retention. Only initiation currently has a 23-hour retry cutoff; refund and cancellation workers have none.
 - **Why not now:** needs provider lookup and an explicit recovery policy before retrying an ambiguous old operation.
 - **Related:** architecture §8.4, §17; ADR-0008, ADR-0010.
+
+## Browser tests for the web interface
+
+- **What:** end-to-end tests of the web interface in a real browser (for example Playwright): sign in as each role, place and pay an order in
+  local mode, cancel one, refund one, resolve a dead letter.
+- **Why not now:** the interface is covered by unit tests of its logic (journey builder, formatting, webhook signing) and was exercised by hand
+  against the running platform; a browser suite needs the whole stack in CI, which the end-to-end job already sets up for the services.
+- **Related:** docs/testing.md, web/README.md.

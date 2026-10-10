@@ -41,8 +41,9 @@ Prerequisites: JDK 21, Docker. The first run pulls the images (PostgreSQL 17, Ka
 the `build` job uploads them as an artifact and `e2e` downloads them. Their location is `e2e.order-service.jar` /
 `e2e.payment-service.jar` in `e2e-tests/pom.xml`.
 
-CI (`.github/workflows/ci.yml`) has four jobs: `build` (`./mvnw verify`, coverage reports, the service jars as an artifact),
-`e2e` (needs `build`; the scenarios above, 25 minutes at most), `images` (the compose files are valid and both images build) and
+<a id="ci"></a>
+CI (`.github/workflows/ci.yml`) has five jobs: `build` (`./mvnw verify`, coverage reports, the service jars as an artifact),
+`web` (the web interface: lint, types, unit tests, production build), `e2e` (needs `build`; the scenarios above, 25 minutes at most), `images` (the compose files are valid and the three images build) and
 `badges` (pushes to `main` only: publishes an overall coverage number to the `badges` branch). The number is the
 line coverage of everything JaCoCo measures in the libraries and services, computed by `.github/scripts/coverage-badge.sh`;
 the 80 % gate of the build applies to `domain` and `application`.

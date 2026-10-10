@@ -8,7 +8,7 @@
 **/*.log
 docs
 scripts
-demo
+web
 infra
 e2e-tests/src
 **/.DS_Store

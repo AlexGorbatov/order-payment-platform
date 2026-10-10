@@ -17,9 +17,11 @@ services:
       STRIPE_API_BASE: ""
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
 
-  checkout:
+  web:
     environment:
-      CHECKOUT_PAYMENT_ELEMENT: "true"
+      # the real Stripe Payment Element; Stripe's webhooks come through the Stripe CLI, so the interface sends none
+      WEB_PAYMENT_ELEMENT: "true"
+      WEB_SIMULATE_WEBHOOKS: "false"
 
   stripe-cli:
     # Only what the platform handles (architecture §8.3); everything else would just be logged as ignored.

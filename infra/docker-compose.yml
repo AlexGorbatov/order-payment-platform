@@ -273,34 +273,37 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  # Demo checkout page (demo/checkout): Keycloak login (Authorization Code + PKCE), products, order, and payment with the
-  # Stripe Payment Element (stripe-test) or the test-support endpoint (local). nginx also proxies /order-api/ and
-  # /payment-api/ to the services, so the browser needs no CORS. http://localhost:8090
-  checkout:
+  # The web interface (web/): storefront, "my orders", back office and operations console. Signs in through Keycloak
+  # (Authorization Code with PKCE) and calls the two services through its own server, so they need no CORS.
+  # http://localhost:8090. Local mode: it plays Stripe's part and sends the signed webhooks (WEB_SIMULATE_WEBHOOKS), because
+  # stripe-mock sends none; docker-compose.stripe-test.yml switches to the real Payment Element and turns that off.
+  web:
     profiles: ["apps"]
-    image: nginx:1.27-alpine
+    build:
+      context: ../web
+    image: opp/web:dev
     environment:
+      ORDER_SERVICE_URL: http://order-service:8081
+      PAYMENT_SERVICE_URL: http://payment-service:8082
+      # what the browser uses (tokens carry this issuer), not what the containers use
+      KEYCLOAK_PUBLIC_URL: http://localhost:8180
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
-      # true only with docker-compose.stripe-test.yml: stripe-mock's client secrets mean nothing to Stripe.js
-      CHECKOUT_PAYMENT_ELEMENT: "false"
-      NGINX_ENVSUBST_FILTER: "STRIPE_|CHECKOUT_"
-      NGINX_ENVSUBST_OUTPUT_DIR: /usr/share/nginx/html
-    volumes:
-      - ../demo/checkout/index.html:/usr/share/nginx/html/index.html:ro
-      - ../demo/checkout/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ../demo/checkout/config.json.template:/etc/nginx/templates/config.json.template:ro
+      WEB_PAYMENT_ELEMENT: "false"
+      WEB_SIMULATE_WEBHOOKS: "true"
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-whsec_local_demo}
     ports:
-      - "8090:80"
+      - "8090:3000"
     depends_on:
       order-service:
         condition: service_healthy
       payment-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/config.json"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/config"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+      start_period: 5s
     restart: unless-stopped
 
   # ---------------------------------------------------------------- profile: observability

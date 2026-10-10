@@ -15,6 +15,13 @@ machine without a Stripe account; real Stripe test mode is optional.
 - **Built to survive failures:** duplicate requests, repeated or out-of-order webhooks, a crash or Kafka outage in the middle of
   a payment do not charge or refund twice ([architecture](docs/architecture.md)).
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Shop](docs/screenshots/shop.png)<br>**Shop**: the catalog and cart | ![Order journey](docs/screenshots/order-journey.png)<br>**Order page**: the journey across both services |
+| ![Back office](docs/screenshots/back-office.png)<br>**Back office**: every order, filters, refunds | ![Operations](docs/screenshots/operations.png)<br>**Operations**: dead letters and reconciliation |
+
 ## Architecture
 
 ```mermaid

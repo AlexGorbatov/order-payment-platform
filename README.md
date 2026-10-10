@@ -2,6 +2,14 @@
 
 [![CI](https://github.com/AlexGorbatov/order-payment-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/AlexGorbatov/order-payment-platform/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/github/license/AlexGorbatov/order-payment-platform)](LICENSE)
+![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.0-6DB33F?logo=springboot&logoColor=white)
+![Kafka](https://img.shields.io/badge/Apache_Kafka-4.3-231F20?logo=apachekafka&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
+![Keycloak](https://img.shields.io/badge/Keycloak-26-4D4D4D?logo=keycloak&logoColor=white)
+![Stripe](https://img.shields.io/badge/Stripe-test_mode-635BFF?logo=stripe&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker_Compose-2496ED?logo=docker&logoColor=white)
 
 A demo of an order and payment flow built from two Spring Boot services that talk through Kafka, with **Stripe in test mode
 only**. Place an order, pay it with a test card, cancel it, refund it, and watch each step cross both services. It runs on your

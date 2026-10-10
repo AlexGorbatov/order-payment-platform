@@ -16,7 +16,7 @@ Everything lives in [`infra/docker-compose.yml`](../infra/docker-compose.yml). T
 ```bash
 cp .env.example .env              # optional: every variable has a dev default
 ./scripts/up.sh                   # default profile; waits until every container is healthy
-./scripts/up.sh --apps            # + order-service, payment-service and the checkout page as containers
+./scripts/up.sh --apps            # + order-service, payment-service and the web interface as containers
 ./scripts/up.sh --apps --stripe-test   # ... against real Stripe (test mode) with the Stripe CLI forwarding webhooks
 ./scripts/up.sh --observability   # + OTel collector, Jaeger, Prometheus, Grafana
 ./scripts/down.sh                 # stop, keep data
@@ -38,7 +38,7 @@ docker compose -f infra/docker-compose.yml ps -a
 | Profile | Containers | Purpose |
 |---|---|---|
 | default | postgres, kafka, kafka-init, kafka-ui, keycloak, stripe-mock | infrastructure for the `local` Spring profile |
-| `apps` | order-service, payment-service, checkout | the services as containers (stripe-mock, `local` Spring profile) and the demo checkout page |
+| `apps` | order-service, payment-service, web | the services as containers (stripe-mock, `local` Spring profile) and the web interface |
 | `stripe-test` | stripe-cli | real Stripe test mode: forwards webhooks to payment-service on the host; with `apps` and [`docker-compose.stripe-test.yml`](../infra/docker-compose.stripe-test.yml) (what `up.sh --apps --stripe-test` does) it also switches payment-service to the real Stripe API |
 | `observability` | otel-collector, jaeger, prometheus, grafana | tracing and metrics backends (skeleton configuration: no service targets, no dashboard; see architecture §13) |
 
@@ -48,7 +48,7 @@ docker compose -f infra/docker-compose.yml ps -a
 |---|---|---|
 | order-service | 8081 | on the host, or the `apps` container |
 | payment-service | 8082 | on the host, or the `apps` container; webhook endpoint `/webhooks/stripe` |
-| checkout page | 8090 | `apps`; nginx with a proxy to the two services |
+| web interface | 8090 | `apps`; Next.js, forwards to the two services (`npm run dev` in `web/` uses 3000) |
 | PostgreSQL | 5432 | |
 | Kafka | 9092 | `localhost:9092` from the host; `kafka:19092` inside the compose network |
 | kafka-ui | 8085 | http://localhost:8085 |

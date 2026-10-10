@@ -46,6 +46,7 @@
       "redirectUris": [
         "http://localhost:5173/*",
         "http://localhost:8090/*",
+        "http://localhost:3000/*",
         "http://localhost:8081/*",
         "http://localhost:8082/*"
       ],
@@ -54,7 +55,7 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:8090/*"
+        "post.logout.redirect.uris": "http://localhost:5173/*##http://localhost:8090/*##http://localhost:3000/*"
       },
       "protocolMappers": [
         {

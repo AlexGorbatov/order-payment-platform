@@ -108,12 +108,12 @@ Needs Git, Docker with Compose v2, Bash, `curl`, `jq` and `openssl`. The first s
 
 ```bash
 git clone https://github.com/AlexGorbatov/order-payment-platform.git && cd order-payment-platform
-./scripts/up.sh --apps              # PostgreSQL, Kafka, Keycloak, stripe-mock, both services, checkout page
+./scripts/up.sh --apps              # PostgreSQL, Kafka, Keycloak, stripe-mock, both services, web interface
 ./scripts/demo.sh success           # place an order, pay, watch it become PAID
 ./scripts/down.sh                   # stop; keep local data
 ```
 
-No `.env` is needed locally. `./scripts/down.sh -v` also removes local database and Kafka volumes. Kafka UI is at <http://localhost:8085>, the checkout page at <http://localhost:8090>, Swagger UI at
+No `.env` is needed locally. `./scripts/down.sh -v` also removes local database and Kafka volumes. Kafka UI is at <http://localhost:8085>, the web interface at <http://localhost:8090> (`customer1`, `admin1`, `ops1`; password `password`), Swagger UI at
 <http://localhost:8081/swagger-ui.html>. Against real Stripe in test mode: `./scripts/up.sh --apps --stripe-test`
 ([docs/demo.md](docs/demo.md)).
 
@@ -159,7 +159,7 @@ libs/platform-idempotency-starter/    HTTP Idempotency-Key support
 services/order-service/               orders, catalog, saga participant, payment timeout
 services/payment-service/             payments, refunds, Stripe gateway, webhooks, reconciliation
 e2e-tests/                            both services as processes: scenarios and chaos tests
-demo/checkout/                        demo page: Keycloak login, products, Stripe Payment Element
+web/                                  web interface: storefront, back office, operations console (Next.js)
 infra/                                docker-compose, Dockerfile, Keycloak realm, observability skeleton
 scripts/                              up/down, tokens, demo scenarios, signed test webhooks
 docs/                                 architecture, ADRs, events, runbooks, testing, demo

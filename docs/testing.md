@@ -42,11 +42,12 @@ the `build` job uploads them as an artifact and `e2e` downloads them. Their loca
 `e2e.payment-service.jar` in `e2e-tests/pom.xml`.
 
 <a id="ci"></a>
-CI (`.github/workflows/ci.yml`) has four jobs: `build` (`./mvnw verify`, coverage reports, the service jars as an artifact),
-`e2e` (needs `build`; the scenarios above, 25 minutes at most), `images` (the compose files are valid and both images build) and
-`badges` (pushes to `main` only: publishes an overall coverage number to the `badges` branch, which the README badge
-reads). The number is the line coverage of everything JaCoCo measures in the libraries and services, computed by
-`.github/scripts/coverage-badge.sh`; the 80 % gate of the build applies to `domain` and `application`.
+CI (`.github/workflows/ci.yml`) has five jobs: `build` (`./mvnw verify`, coverage reports, the service jars as an artifact),
+`web` (the web interface: lint, types, unit tests, production build), `e2e` (needs `build`; the scenarios above, 25 minutes at
+most), `images` (the compose files are valid and the three images build) and `badges` (pushes to `main` only: publishes an
+overall coverage number to the `badges` branch, which the README badge reads). The number is the line coverage of everything
+JaCoCo measures in the libraries and services, computed by `.github/scripts/coverage-badge.sh`; the 80 % gate of the build
+applies to `domain` and `application`.
 
 Logs of the two services are written to `e2e-tests/target/e2e-logs/` (appended across restarts within a run). When a
 scenario fails, the tail of both is printed with the failure, and CI uploads the directory.

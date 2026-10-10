@@ -7,7 +7,7 @@ refuses to start with a live key (`LiveModeGuard`) and rejects live-mode webhook
 - [Quick start (local)](#quick-start-local)
 - [Real Stripe in test mode](#real-stripe-in-test-mode)
 - [The scenarios](#the-scenarios) and [what each one demonstrates](#what-each-scenario-demonstrates)
-- [The checkout page](#the-checkout-page)
+- [The web interface](#the-web-interface)
 - [What to look at](#what-to-look-at): Stripe Dashboard, Kafka UI, database, logs, Jaeger and Grafana
 - [Troubleshooting](#troubleshooting)
 
@@ -18,7 +18,7 @@ service images from the sources (a few minutes; later starts use the cache).
 
 ```bash
 cp .env.example .env            # optional: every value has a default that works locally
-./scripts/up.sh --apps          # PostgreSQL, Kafka, Keycloak, stripe-mock, order-service, payment-service, checkout page
+./scripts/up.sh --apps          # PostgreSQL, Kafka, Keycloak, stripe-mock, order-service, payment-service, web interface
 ./scripts/demo.sh success
 ```
 
@@ -45,7 +45,7 @@ Put them in `.env` (it is gitignored; never commit it):
 
 ```dotenv
 STRIPE_API_KEY=sk_test_...
-STRIPE_PUBLISHABLE_KEY=pk_test_...     # only the checkout page uses it
+STRIPE_PUBLISHABLE_KEY=pk_test_...     # only the web interface uses it
 ```
 
 ### 2. Start the platform against Stripe
@@ -127,7 +127,7 @@ tuning"): an unpaid order is cancelled after **1 minute** (default 30) and the c
 |---|---|---|---|
 | `success` | The customer orders and pays. | The whole saga across two services that never call each other: outbox → Kafka → consumer → worker creating the PaymentIntent with an idempotency key (`pi-create:{paymentId}`) → Stripe → signed webhook → stored first, processed asynchronously → `PaymentSucceeded` → order `PAID`. ([§6.1](architecture.md#61-happy-path)) | `OrderCreated`, `PaymentInitiated`, `PaymentSucceeded` |
 | `decline-then-success` | The first card is declined, a second one works. | A failed attempt is not a failed order: the order stays `PENDING_PAYMENT`, the failure is recorded (`last_error_code`) and announced, and the customer retries on the **same** PaymentIntent. ([§6.2](architecture.md#62-failed-attempt-and-retry)) | `OrderCreated`, `PaymentInitiated`, `PaymentAttemptFailed`, `PaymentSucceeded` |
-| `3ds` | The card asks for 3-D Secure. | `REQUIRES_ACTION` is a waiting state, not an outcome: the order does not change until the authentication ends. ([§6.3](architecture.md#63-strong-customer-authentication-3ds)) With the real Stripe the challenge needs a browser, so the script pays with another card instead; the [checkout page](#the-checkout-page) does the real challenge. | `OrderCreated`, `PaymentInitiated`, `PaymentActionRequired`, `PaymentSucceeded` |
+| `3ds` | The card asks for 3-D Secure. | `REQUIRES_ACTION` is a waiting state, not an outcome: the order does not change until the authentication ends. ([§6.3](architecture.md#63-strong-customer-authentication-3ds)) With the real Stripe the challenge needs a browser, so the script pays with another card instead; the [web interface](#the-web-interface) does the real challenge. | `OrderCreated`, `PaymentInitiated`, `PaymentActionRequired`, `PaymentSucceeded` |
 | `timeout-late-payment` | Nobody pays in time; the order is cancelled; then the money arrives anyway. | The hardest race of the saga ([§6.4](architecture.md#64-cancellation-and-the-late-success-race), F18): a payment on a cancelled order triggers an asynchronous refund request; a failure remains visible as `REFUND_FAILED`. The payment-timeout job cancels the order, `OrderCancelled` goes to payment-service, but the payment succeeds before the PaymentIntent is cancelled; order-service sees `PaymentSucceeded` on a cancelled order and requests a refund (`LATE_PAYMENT_AFTER_CANCEL`) on its own. | `OrderCreated`, `PaymentInitiated`, `OrderCancelled` (`TIMEOUT`), `PaymentSucceeded`, `OrderRefundRequested`, `PaymentRefunded` |
 | `refund` | An admin refunds a paid order. | Role-based access (`admin1`), `202 Accepted` for work that finishes later, the refund worker creating the Stripe refund (`refund:{refundId}`), and the final state coming from the webhook, not from the API call. One refund per request id: repeating the call with the same `Idempotency-Key` changes nothing. ([§6.5](architecture.md#65-refund)) | `…PaymentSucceeded`, `OrderRefundRequested` (`ADMIN`), `PaymentRefunded` |
 | `dispute` | The cardholder disputes the charge. | A notification-only flow: the order **stays `PAID`** and is flagged `disputed`; a `PaymentDisputed` event is published once, however often the webhook is delivered. | `…PaymentSucceeded`, `PaymentDisputed` |
@@ -146,21 +146,36 @@ for i in 1 2; do
 done      # the second answer is the first one again, flagged Idempotent-Replayed: true; there is one order
 ```
 
-## The checkout page
+## The web interface
 
-`http://localhost:8090` (part of the `apps` profile): sign in through Keycloak (Authorization Code with PKCE, `keycloak-js`;
-users `customer1` / `password`), choose products, place the order, and pay.
+`http://localhost:8090` (part of the `apps` profile; [web/README.md](../web/README.md) has the details). Sign in through Keycloak
+(Authorization Code with PKCE); the dev realm has three users, all with the password `password`, and each lands on the part
+of the app their role is for:
 
-- **With `--stripe-test`** the page shows the **Stripe Payment Element** with the client secret the platform returns for the
-  order (only to its owner, `Cache-Control: no-store`). Use Stripe's test cards: `4242 4242 4242 4242` pays, `4000 0000
-  0000 9995` is declined, `4000 0025 0000 3155` triggers a real 3-D Secure challenge (<https://docs.stripe.com/testing>).
-  The page needs `STRIPE_PUBLISHABLE_KEY` and loads Stripe.js from Stripe. The order status on the page is updated by the
-  platform after the webhook, not by the browser: that is the point.
-- **Locally** there is no Stripe.js to talk to; the page offers the test-support payment instead, and the webhook still has to
-  be sent (`./scripts/send-test-webhook.sh payment_intent.succeeded <order id>`).
+| User | Role | What to do |
+|---|---|---|
+| `customer1` | customer | **Shop**: fill the cart and place an order. **My orders**: every order, newest first. An order's page shows its **journey** (two lanes, one per service, in the order things happened), the payment, and, while the order is unpaid, the way to pay it and a **Cancel order** button. |
+| `admin1` | admin | **Back office**: every order with figures (awaiting payment, paid, refunds), status filters and search. Open an order and **Refund order** (or **Retry refund** after a failed one). |
+| `ops1` | ops | **Operations**: dead letters of both services (inspect the payload, replay once, resolve with a comment) and **Reconciliation** (run it, read what it corrected). |
 
-The page is served by nginx, which also proxies `/order-api/` and `/payment-api/` to the services (one origin, no CORS
-configuration in the services). It is a demo client, not part of the platform.
+- **Locally** there is no Stripe.js to talk to, and `stripe-mock` sends no webhooks. The order page offers the Stripe test cards
+  (works, declined, insufficient funds, 3-D Secure, disputed): it confirms the PaymentIntent with the chosen one through the test-support
+  endpoint and then sends the signed webhook Stripe would send, so the order changes exactly as it would for a real payment. A
+  **Play Stripe** card on the page sends any webhook by hand (a refund confirmation after an admin refund, a dispute, a failed
+  authentication).
+- **With `--stripe-test`** the order page shows the **Stripe Payment Element** with the client secret the platform returns to the
+  order's owner (`Cache-Control: no-store`). Use Stripe's test cards: `4242 4242 4242 4242` pays, `4000 0000 0000 9995` is declined,
+  `4000 0025 0000 3155` triggers a real 3-D Secure challenge (<https://docs.stripe.com/testing>). It needs `STRIPE_PUBLISHABLE_KEY` and
+  loads Stripe.js from Stripe. The page does not decide the outcome: the order changes when Stripe's webhook has been processed.
+
+The web server also forwards the browser's calls to the two services (one origin, so they need no CORS configuration). To see a dead
+letter, put a malformed record on a topic and open Operations:
+
+```bash
+printf 'any-key:{ not an event\n' | docker compose -f infra/docker-compose.yml exec -T kafka \
+  /opt/kafka/bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic payment.events.v1 \
+  --reader-property parse.key=true --reader-property key.separator=:
+```
 
 ## What to look at
 
@@ -209,7 +224,7 @@ start but stay empty.
 | `up.sh` stops with "still a placeholder" or "needs a TEST-MODE key" | `.env` has no real `sk_test_...` for `--stripe-test`. Live keys (`sk_live_...`) are always refused. |
 | `up.sh --stripe-test`: "could not get the webhook secret" | The key is wrong or revoked; check `docker compose -f infra/docker-compose.yml logs stripe-cli`. |
 | Webhooks answer `400` | The secret differs: the service and the sender must share `STRIPE_WEBHOOK_SECRET`. With `--stripe-test` the CLI's secret is used; with local mode `.env` (or `whsec_local_demo` without `.env`) for both ([runbooks/webhooks.md](runbooks/webhooks.md)). |
-| Local mode: the order stays `PENDING_PAYMENT` after paying | stripe-mock sends no webhook: `demo.sh` sends it; when paying by hand or on the checkout page run `./scripts/send-test-webhook.sh payment_intent.succeeded <order id>`. |
+| Local mode: the order stays `PENDING_PAYMENT` after paying | stripe-mock sends no webhook: `demo.sh` sends it; `demo.sh` and the web interface send it; when paying by hand run `./scripts/send-test-webhook.sh payment_intent.succeeded <order id>`. |
 | stripe-test: payment-service logs `401` from Stripe | `STRIPE_API_KEY` is not a valid key of your account; the platform reports it as a configuration error and waits instead of retrying blindly. |
 | `timeout-late-payment` (real Stripe) says the PaymentIntent is no longer payable | The cancellation worker (every 15 s) cancelled it before the late payment: the race of the scenario went the other way. Run it again. |
 | The Payment Element does not show | `STRIPE_PUBLISHABLE_KEY` is empty or not a test key, or the stack was not started with `--stripe-test`. |

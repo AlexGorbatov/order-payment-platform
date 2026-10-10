@@ -49,6 +49,30 @@ jobs:
           if-no-files-found: error
           retention-days: 2
 
+  # The web interface (web/): lint, types, unit tests and a production build. Independent of the Java build.
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
   # Both services as processes against PostgreSQL, Kafka, Keycloak and a Stripe double (docs/testing.md). Separate from
   # `build` because it takes minutes and needs the jars, not the sources; a hung environment ends at the timeouts, not
   # at the six hours GitHub allows.
@@ -130,6 +154,14 @@ jobs:
           push: false
           cache-from: type=gha,scope=images
           cache-to: type=gha,scope=images,mode=max
+
+      - name: Build the web image
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          push: false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
 
   # Publishes the coverage number for the README badge: the JaCoCo reports of `build`, reduced to a shields.io endpoint
   # file on the `badges` branch (kept apart from the code). Only for pushes to main, and the only job that may write.

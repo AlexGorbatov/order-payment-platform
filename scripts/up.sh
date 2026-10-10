@@ -2,7 +2,7 @@
 # Starts the local infrastructure (and optionally the services) and waits until every container is healthy.
 #
 #   ./scripts/up.sh                       # postgres, kafka, kafka-ui, keycloak, stripe-mock
-#   ./scripts/up.sh --apps                # + order-service and payment-service as containers, against stripe-mock
+#   ./scripts/up.sh --apps                # + order-service, payment-service and the web interface as containers, against stripe-mock
 #   ./scripts/up.sh --apps --stripe-test  # ... against the REAL Stripe API (test mode) + stripe-cli forwarding webhooks
 #   ./scripts/up.sh --stripe-test         # + stripe-cli only, for services running on the host
 #   ./scripts/up.sh --observability       # + otel-collector, jaeger, prometheus, grafana
@@ -64,7 +64,7 @@ if $apps; then
     build=(--build)
 fi
 
-compose ${profiles[@]+"${profiles[@]}"} up -d ${build[@]+"${build[@]}"} --wait --wait-timeout 600
+compose ${profiles[@]+"${profiles[@]}"} up -d --remove-orphans ${build[@]+"${build[@]}"} --wait --wait-timeout 600
 compose ${profiles[@]+"${profiles[@]}"} ps -a
 
 cat << 'MSG'
@@ -82,6 +82,7 @@ if $apps; then
 Services:
     order-service    http://localhost:8081   Swagger UI /swagger-ui.html
     payment-service  http://localhost:8082   webhooks POST /webhooks/stripe
-Try it: ./scripts/demo.sh success
+    web interface    http://localhost:8090   customer1, admin1, ops1 (password: password)
+Try it: open the web interface, or ./scripts/demo.sh success
 MSG
 fi

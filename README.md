@@ -110,8 +110,14 @@ No test needs a Stripe account. The web interface has its own checks: `npm run l
 
 ## Stack
 
-Java 21, Spring Boot 4, PostgreSQL 17 with Flyway, Apache Kafka 4, Keycloak 26, `stripe-java`, Resilience4j, Micrometer,
-Testcontainers; the web interface is Next.js 16 with React 19 and Tailwind CSS 4.
+- **Backend:** Java 21, Spring Boot (Web MVC, Data JPA, Security OAuth2 Resource Server, Actuator), PostgreSQL with Flyway,
+  Apache Kafka (KRaft) with Spring Kafka, Keycloak (OIDC, JWT, PKCE), `stripe-java`, Resilience4j, Micrometer, springdoc-openapi.
+- **Patterns:** hexagonal architecture, choreography saga, transactional outbox and inbox, idempotency at every boundary,
+  database-backed workers, reconciliation with Stripe.
+- **Web interface:** Next.js 16, React 19, TypeScript, Tailwind CSS 4, Radix UI, TanStack Query, Stripe Elements.
+- **Tests:** JUnit 5, AssertJ, Awaitility, Testcontainers, WireMock, `stripe-mock`, ArchUnit, JaCoCo; Vitest for the web interface.
+- **Infrastructure:** Docker Compose, Stripe CLI, Kafka UI, GitHub Actions; OpenTelemetry Collector, Jaeger, Prometheus and
+  Grafana as empty skeletons.
 
 ## Documentation
 

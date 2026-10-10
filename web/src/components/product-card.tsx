@@ -26,7 +26,7 @@ export function ProductCard({ product, index }: { product: Product; index: numbe
     >
       <div className="relative grid h-36 place-items-center bg-surface-2">
         <div className="absolute inset-0 opacity-[0.55] [background:radial-gradient(circle_at_30%_20%,var(--accent-soft),transparent_60%)]" aria-hidden />
-        <Glyph sku={product.sku} className="relative size-12 text-accent transition-transform duration-300 group-hover:scale-110" />
+        <Glyph sku={product.sku} className="relative size-12 text-accent-fg transition-transform duration-300 group-hover:scale-110" />
         <span className="absolute bottom-2 left-3 font-mono text-[10px] uppercase tracking-widest text-muted">{product.sku}</span>
       </div>
       <div className="flex flex-1 flex-col gap-4 p-4">

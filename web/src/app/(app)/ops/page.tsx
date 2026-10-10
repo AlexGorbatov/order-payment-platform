@@ -23,7 +23,7 @@ export default function OperationsPage() {
     <>
       <PageHeader
         eyebrow="Operations"
-        title="When something does not go through"
+        title={<>When something does <span className="gradient-text">not go through</span></>}
         description="Events that could not be processed wait here for a decision, and payments that went quiet can be checked against Stripe."
       />
       <Tabs defaultValue="dead-letters">

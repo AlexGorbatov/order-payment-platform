@@ -17,6 +17,7 @@ versions follow [Semantic Versioning](https://semver.org/). The event contracts 
 ### Changed
 
 - The demo checkout page (nginx, `demo/checkout`) is replaced by the web interface; `scripts/up.sh` removes orphaned containers.
+- The web interface follows the Altronix Software look: navy ground, cyan to blue to violet gradient, Manrope and JetBrains Mono; dark by default.
 
 ## [1.0.0] - 2026-10-09
 

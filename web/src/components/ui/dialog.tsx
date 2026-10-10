@@ -10,7 +10,7 @@ export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogClose = DialogPrimitive.Close;
 
 const overlay =
-  "anim-fade fixed inset-0 z-50 bg-ink/40 backdrop-blur-[2px]";
+  "anim-fade fixed inset-0 z-50 bg-[var(--overlay)] backdrop-blur-[3px]";
 
 export function DialogContent({
   className,
@@ -29,7 +29,7 @@ export function DialogContent({
         )}
         {...props}
       >
-        <DialogPrimitive.Title className="font-display text-lg font-semibold">{title}</DialogPrimitive.Title>
+        <DialogPrimitive.Title className="font-display text-xl">{title}</DialogPrimitive.Title>
         {description ? (
           <DialogPrimitive.Description className="mt-1.5 text-sm text-muted">{description}</DialogPrimitive.Description>
         ) : (
@@ -65,7 +65,7 @@ export function SheetContent({
         {...props}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <DialogPrimitive.Title className="font-display text-lg font-semibold">{title}</DialogPrimitive.Title>
+          <DialogPrimitive.Title className="font-display text-xl">{title}</DialogPrimitive.Title>
           <DialogPrimitive.Close className="rounded-md p-1 text-muted hover:bg-surface-2 hover:text-ink" aria-label="Close">
             <X className="size-4" />
           </DialogPrimitive.Close>

@@ -16,7 +16,7 @@ export default function ShopPage() {
     <>
       <PageHeader
         eyebrow="Catalog"
-        title="Pick something to buy"
+        title={<>Pick something <span className="gradient-text">to buy</span></>}
         description="Prices live on the server, so the total you see is the total you pay. Place an order, then watch it cross two services."
       />
       {!user.isCustomer ? (

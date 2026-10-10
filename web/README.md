@@ -78,9 +78,9 @@ src/lib/              API client, queries, journey builder, status vocabulary, c
 ```
 
 Stack: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4, Radix primitives, TanStack Query, `keycloak-js`,
-`@stripe/react-stripe-js`, Motion, Sonner. Type: Bricolage Grotesque for headings and amounts, Geist for the interface, Geist Mono for ids and
-times. Colors are named after what the money is doing (settled, in flight, failed, went back) and live as tokens in `globals.css`,
-light and dark.
+`@stripe/react-stripe-js`, Motion, Sonner. Type: Manrope for headings and the interface, JetBrains Mono for ids, times and labels. The look follows the
+Altronix Software site: a deep navy ground, a cyan to blue to violet brand gradient, dark by default with a light variant. Colors are
+named after what the money is doing (settled, in flight, failed, went back) and live as tokens in `globals.css`.
 
 ## Checks
 

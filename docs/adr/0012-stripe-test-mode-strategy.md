@@ -88,9 +88,9 @@ breaker and the metrics count gateway calls, not HTTP requests.
 ### Reconciliation with the current documentation (2026-10-09)
 
 Checked against the stripe-java 34.0.0 README, CHANGELOG and sources, the `stripe/stripe-mock` v0.205.0 OpenAPI validation, and
-search excerpts of docs.stripe.com during the adapter implementation. Direct access was blocked in that build environment;
-the release documentation review subsequently verified provider key retention against the live documentation. Items still
-marked "unverified" have not been confirmed against a real test account.
+search excerpts of docs.stripe.com during the adapter implementation. The release documentation review subsequently verified
+provider key retention against the live documentation. Items still marked "unverified" have not been confirmed against a real
+test account.
 
 | # | architecture.md says | Current state | Consequence |
 |---|---|---|---|

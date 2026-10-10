@@ -46,7 +46,7 @@ Ideas and follow-ups that are out of scope for the current task. Each entry: wha
 ## HTTP idempotency: business commit and response recording
 
 - **What:** make order placement and the successful HTTP idempotency result atomic. Today the order commits before the interceptor records the response; after a crash and claim abandonment, a retry can allocate a new order id.
-- **Why not now:** requires a persistence contract between the generic starter and use cases, or a durable business request key; this task documents existing behavior.
+- **Why not now:** requires a persistence contract between the generic starter and use cases, or a durable business request key. The current behavior is documented in architecture §7.3.
 - **Related:** architecture §7.3; ADR-0006. Add a process-crash test covering the interval between these commits.
 
 ## Automatic webhook retention

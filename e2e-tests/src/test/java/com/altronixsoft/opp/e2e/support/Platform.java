@@ -23,8 +23,8 @@ import org.testcontainers.utility.MountableFile;
 /**
  * The whole platform of the scenarios, started once per JVM: PostgreSQL (the two databases of the compose setup),
  * Kafka, Keycloak with the realm of the local environment, the Stripe simulator, and the two services as processes of
- * the very jars the build produces. See {@code docs/testing.md} for why the services are processes and not Spring contexts
- * in this JVM.
+ * the very jars the build produces. The services are processes, not Spring contexts of this JVM, so that the chaos
+ * scenarios can really {@code kill -9} one.
  *
  * <p>The containers are removed by Testcontainers when the JVM ends; the service processes are stopped by a shutdown hook.
  */

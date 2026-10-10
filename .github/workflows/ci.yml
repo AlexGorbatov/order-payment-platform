@@ -73,7 +73,7 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  # Both services as processes against PostgreSQL, Kafka, Keycloak and a Stripe double (docs/testing.md). Separate from
+  # Both services as processes against PostgreSQL, Kafka, Keycloak and a Stripe double. Separate from
   # `build` because it takes minutes and needs the jars, not the sources; a hung environment ends at the timeouts, not
   # at the six hours GitHub allows.
   e2e:

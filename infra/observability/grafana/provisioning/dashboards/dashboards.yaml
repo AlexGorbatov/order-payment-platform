@@ -1,4 +1,4 @@
-# Loads dashboard JSON files from infra/observability/grafana/dashboards (empty until T16).
+# Loads dashboard JSON files from infra/observability/grafana/dashboards (empty).
 apiVersion: 1
 
 providers:

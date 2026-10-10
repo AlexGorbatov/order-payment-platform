@@ -1,4 +1,4 @@
-# STUB (T02): minimal working pipelines. Processors, resource attributes and tail sampling arrive in T16.
+# Stub: minimal working pipelines. Processors, resource attributes and tail sampling are not included.
 extensions:
   health_check:
     endpoint: 0.0.0.0:13133

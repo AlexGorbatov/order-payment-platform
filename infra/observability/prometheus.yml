@@ -1,4 +1,4 @@
-# STUB (T02): scrapes only the observability stack itself. Service targets and alert rules arrive in T16.
+# Stub: scrapes only the observability stack itself. Service targets and alert rules are not included.
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -12,7 +12,7 @@ scrape_configs:
     static_configs:
       - targets: ["otel-collector:8889"]
 
-  # T16: services running on the host (or in the `apps` profile, T18)
+  # Service targets (on the host, or in the `apps` profile) would go here:
   # - job_name: order-service
   #   metrics_path: /actuator/prometheus
   #   static_configs:

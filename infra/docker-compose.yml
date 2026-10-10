@@ -4,7 +4,7 @@
 #   apps            : order-service, payment-service (images built from infra/Dockerfile) against stripe-mock
 #   stripe-test     : stripe-cli forwarding real test-mode webhooks to payment-service (on the host, or with `apps`
 #                     together with docker-compose.stripe-test.yml, which also points payment-service at real Stripe)
-#   observability   : otel-collector, jaeger, prometheus, grafana (configs are stubs, filled in T16)
+#   observability   : otel-collector, jaeger, prometheus, grafana (configs are stubs: no service targets, no dashboard)
 #
 # Prefer ./scripts/up.sh and ./scripts/down.sh: they pass the repo-root .env, the right profiles and the right files.
 # Every variable has a dev default, so a plain `docker compose up -d` in infra/ works without .env.
@@ -120,7 +120,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
       KC_HEALTH_ENABLED: "true"
       # Fixed frontend URL => tokens always carry iss=http://localhost:8180/realms/opp, whether they are
-      # requested from the host or from containers (T18); backchannel (JWKS) stays reachable as keycloak:8080.
+      # requested from the host or from containers; backchannel (JWKS) stays reachable as keycloak:8080.
       KC_HOSTNAME: http://localhost:8180
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
       # Substituted into realm-opp.json on import.
@@ -307,7 +307,7 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------- profile: observability
-  # Minimal working stubs; dashboards, alert rules and service scraping arrive in T16.
+  # Minimal working stubs; dashboards, alert rules and service scraping are not included.
 
   otel-collector:
     profiles: ["observability"]

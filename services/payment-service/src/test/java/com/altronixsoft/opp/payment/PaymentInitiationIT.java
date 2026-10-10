@@ -316,7 +316,7 @@ class PaymentInitiationIT extends AbstractPaymentIT {
 
     @Test
     @DisplayName(
-            "§6.2: OrderCancelled after the PaymentIntent exists only marks cancel_requested; the worker of T14 cancels")
+            "§6.2: OrderCancelled after the PaymentIntent exists only marks cancel_requested; the cancellation worker cancels")
     void cancellingAfterInitiationOnlyRequestsTheCancellation() {
         TestStripe.stubCreate("pi_it_9", 3097, "EUR");
         UUID orderId = placeOrder();

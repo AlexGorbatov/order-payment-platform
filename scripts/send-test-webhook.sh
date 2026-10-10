@@ -103,5 +103,5 @@ status="$(printf '%s' "$body" | curl -sS -o /dev/stderr -w '%{http_code}' -X POS
     -H "Stripe-Signature: t=$timestamp,v1=$signature" \
     --data-binary @-)"
 echo >&2
-[[ "$status" == 200 ]] || die "payment-service answered $status (wrong STRIPE_WEBHOOK_SECRET? see docs/runbooks/webhooks.md)"
+[[ "$status" == 200 ]] || die "payment-service answered $status (wrong STRIPE_WEBHOOK_SECRET? see docs/demo.md)"
 echo "sent $fixture (evt_local_$suffix) for order $order_id, PaymentIntent $payment_intent: HTTP $status"

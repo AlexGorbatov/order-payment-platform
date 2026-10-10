@@ -167,7 +167,7 @@ public class StripeNotificationHandler {
             case SUCCEEDED -> {
                 log.error(
                         "Webhook {}: refund {} failed after it had succeeded; the payment stays REFUNDED. "
-                                + "Check it in the Stripe Dashboard (runbook webhooks.md).",
+                                + "Check it in the Stripe Dashboard.",
                         event.eventId(),
                         refund.id());
                 return NotificationOutcome.IGNORED;

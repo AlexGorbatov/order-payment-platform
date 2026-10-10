@@ -172,7 +172,7 @@ class ChaosIT extends E2eTest {
         JsonNode deadLetter = awaitDeadLetter(platform.orderService(), order.id());
         assertThat(deadLetter.get("originalTopic").stringValue()).isEqualTo(Topics.PAYMENT_EVENTS);
         assertThat(deadLetter.get("status").stringValue()).isEqualTo("NEW");
-        // only the consuming service keeps a dead letter; the other one has no business with it (runbook dlq.md)
+        // only the consuming service keeps a dead letter; the other one has no business with it
         await().during(Duration.ofSeconds(2))
                 .atMost(Duration.ofSeconds(10))
                 .until(() ->

@@ -24,8 +24,7 @@ import org.springframework.transaction.support.TransactionOperations;
  *       the payment or refund and writes the outbox, and the event becomes {@code PROCESSED} or {@code IGNORED} — all
  *       committed together. A stale report is not an error: the event is {@code PROCESSED}.
  *   <li><b>On failure</b> (new transaction): everything above rolled back; the event becomes {@code FAILED} with
- *       exponential backoff, or {@code DEAD} after {@code maxAttempts} (F14). An operator replays a dead event
- *       (runbook {@code webhooks.md}).
+ *       exponential backoff, or {@code DEAD} after {@code maxAttempts} (F14). An operator replays a dead event.
  * </ol>
  *
  * No Stripe call happens here: a webhook carries the state it reports. One event's failure never stops the others.

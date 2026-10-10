@@ -1,7 +1,7 @@
 # Event Catalog
 
 Contract of the messages exchanged between `order-service` and `payment-service` over Kafka — architecture §9,
-[ADR-0011](adr/0011-json-events-explicit-versioning.md). The source of truth is code and schemas in
+[ADR-0011](architecture.md#18-decisions). The source of truth is code and schemas in
 [`libs/event-contracts`](../libs/event-contracts): payload records, `EventCatalog`, and one JSON Schema (draft 2020-12)
 per event in `src/main/resources/schemas/{EventType}.v{N}.json`. This page is checked against the catalog by
 `EventCatalogTest`: every event must have a section here with its topic and producer.

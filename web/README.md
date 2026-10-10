@@ -91,4 +91,4 @@ npm test            # journey builder, formatting, webhook signing and event sha
 npm run build
 ```
 
-CI runs the same four (`web` job). There are no browser tests yet (backlog).
+CI runs the same four (`web` job). There are no browser tests yet.

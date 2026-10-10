@@ -85,7 +85,7 @@ stripe:
   read-timeout: 15s
   max-network-retries: 2
   webhook:
-    # comma-separated: two secrets while one is rolled (runbook webhooks.md). Empty: every webhook is refused.
+    # comma-separated: two secrets while one is rolled. Empty: every webhook is refused.
     signing-secrets: ${STRIPE_WEBHOOK_SECRET:}
     tolerance: 300s
 

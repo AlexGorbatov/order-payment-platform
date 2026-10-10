@@ -1,4 +1,4 @@
-# STUB (T02): data sources only. The "OPP Overview" dashboard arrives in T16.
+# Stub: data sources only; no dashboard is included.
 apiVersion: 1
 
 datasources:

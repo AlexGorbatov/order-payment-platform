@@ -52,7 +52,7 @@ services as processes against PostgreSQL, Kafka, Keycloak and a stateful Stripe 
 (Keycloak login with PKCE, Stripe Payment Element), signed test webhooks, token scripts ([docs/demo.md](docs/demo.md)).
 
 **CI**: build and verify with coverage reports, the end-to-end suite as a separate job that reuses the built jars, a check
-that the compose files are valid and the images build, and publication of overall coverage to the `badges` branch. The README currently displays the enforced coverage gate because the published endpoint is not yet available.
+that the compose files are valid and the images build, and publication of overall coverage to the `badges` branch, which the README coverage badge reads (it shows "not found" until the job has run once on `main`).
 
 **Documentation**: architecture with a 22-entry failure-mode matrix mapped to tests, fourteen ADRs with an index, the event
 catalog, runbooks for dead letters and webhooks, the testing guide, the demo guide, a backlog.
@@ -65,13 +65,4 @@ catalog, runbooks for dead letters and webhooks, the testing guide, the demo gui
 
 ### Known limitations
 
-- Test mode only, by design. No partial refunds, multi-currency, manual capture or Kubernetes packaging.
-- Tracing export, structured (ECS) logs, dashboards and alert rules are not included; metrics, correlation ids and the
-  `traceparent` hook in the outbox are ([architecture §13](docs/architecture.md#13-observability)).
-- The dead-letter persister defaults to every `*-dlt` topic; each service sets its own pattern
-  ([ADR-0007](docs/adr/0007-retry-topics-dlt-ordering-tradeoff.md), [backlog](docs/backlog.md)).
-- Error `type` URNs use two prefixes (`urn:problem-type:` and `urn:opp:problem:`).
-- HTTP business commits and cached responses are separate transactions; a crash can allow duplicate order creation on retry.
-- Webhook cleanup is manual; reconciliation covers unfinished PaymentIntents, not refund outcomes or disputes.
-- Refund and cancellation retries have no age cutoff for provider key retention; unresolved old mutations require checking Stripe before recovery.
-- Retry topics do not keep per-key order; the consumers are written to tolerate it ([ADR-0007](docs/adr/0007-retry-topics-dlt-ordering-tradeoff.md)).
+The limitations of this version, with their reasons, are listed once, in [architecture §17](docs/architecture.md#17-out-of-scope--future-work).

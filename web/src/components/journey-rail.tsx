@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { formatClock, formatOffset } from "@/lib/format";
 import type { Journey, JourneyEvent } from "@/lib/journey";
@@ -30,6 +30,7 @@ export function JourneyRail({ journey, live }: { journey: Journey; live: boolean
   const columns = events.length + (next ? 1 : 0);
   const first = events[0]?.at;
   const scroller = useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = useState(false);
 
   // A long journey scrolls sideways: keep the newest event in view as it arrives.
   useEffect(() => {
@@ -40,7 +41,7 @@ export function JourneyRail({ journey, live }: { journey: Journey; live: boolean
   }, [columns]);
 
   return (
-    <div className="overflow-x-auto" ref={scroller}>
+    <div className="overflow-x-auto" ref={scroller} onScroll={(event) => setScrolled(event.currentTarget.scrollLeft > 0)}>
       <div className="space-y-1 pb-1" style={{ minWidth: `${Math.max(columns, 3) * 6.75 + 9}rem` }}>
         {LANES.map((lane) => {
           const mine = events.map((event, column) => ({ event, column })).filter((entry) => entry.event.lane === lane.id);
@@ -51,7 +52,7 @@ export function JourneyRail({ journey, live }: { journey: Journey; live: boolean
 
           return (
             <div key={lane.id} className="flex items-stretch gap-4">
-              <div className="sticky left-0 z-20 w-32 shrink-0 bg-surface pt-0.5 pr-2">
+              <div className={cn("sticky left-0 z-20 w-32 shrink-0 pt-0.5 pr-2", scrolled && "bg-surface")}>
                 <p className="font-mono text-xs font-medium">{lane.name}</p>
                 <p className="text-[11px] leading-snug text-muted">{lane.note}</p>
               </div>
